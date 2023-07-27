@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::collections::HashMap;
 
+#[derive(Debug)]
 pub struct NFA {
     pub states: HashSet<String>,
     pub alphabet: HashSet<String>,
@@ -25,5 +26,20 @@ impl NFA {
 	}
     }
 
-    
+    pub fn state_symbols_map(&mut self, state: &str) ->
+	&mut HashMap<String, HashSet<String>>
+    {
+	    self.transition_function
+		.entry(state.to_string())
+		.or_insert(HashMap::new())
+    }
+
+    pub fn symbol_states_set(&mut self, state: &str, symbol: &str) -> &mut HashSet<String> {
+	if !self.alphabet.contains(symbol) {
+	    eprintln!("Warning: Symbol {symbol} is not in alphabet {:?}", self.alphabet);
+	}
+	self.state_symbols_map(state)
+	    .entry(symbol.to_string())
+	    .or_insert(HashSet::new())
+    }
 }
