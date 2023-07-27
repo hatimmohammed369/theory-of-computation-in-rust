@@ -90,9 +90,9 @@ impl NFA {
     }
 
     pub fn write_state_symbols_map(&mut self, state: &str) -> &mut HashMap<String, HashSet<String>> {
-	    self.transition_function
-		.entry(state.to_string())
-		.or_insert(HashMap::new())
+	self.transition_function
+	    .entry(state.to_string())
+	    .or_insert(HashMap::new())
     }
 
     pub fn write_symbol_states_set(&mut self, state: &str, symbol: &str) -> &mut HashSet<String> {
@@ -119,5 +119,106 @@ impl NFA {
 		destination.insert(x.to_string());
 	    }
 	);
+    }
+
+    fn expand(&self, set:&HashSet<String>) -> HashSet<String> {
+	let mut out = set.clone();
+
+	if self.is_deterministic || set.is_empty() {
+	    return out;
+	}
+
+	for elem in set.iter() {
+	    self.read_symbol_states_set(&elem, "")
+		.unwrap_or(&HashSet::new())
+		.iter()
+		.for_each(
+		    |x| {
+			out.insert(x.to_string());
+		    }
+		);
+	}
+
+	loop {
+	    let before = out.len();
+	    for elem in set.clone() {
+		self.read_symbol_states_set(&elem, "")
+		    .unwrap_or(&HashSet::new())
+		    .iter()
+		    .for_each(
+			|x| {
+			    out.insert(x.to_string());
+			}
+		    );
+	    }
+	    if before == out.len() {
+		break;
+	    }
+	}
+
+	out
+    }
+
+    fn move_set(&self, set: &HashSet<String>, symbol: &str) -> HashSet<String> {
+	let mut out = HashSet::new();
+	for elem in set {
+	    let mut x = &HashSet::new();
+	    if let Some(value) = self.read_symbol_states_set(elem, symbol) {
+		x = value;
+	    }
+	    let y = self.expand(x);
+	    y.iter().for_each(
+		|element| {
+		    out.insert(element.to_string());
+		}
+	    )
+	}
+	out
+    }
+
+    pub fn compute(&mut self, input: &str, log: bool) -> ComputationResult {
+	let mut automaton_states = HashSet::new();
+	automaton_states.insert(self.start_state.to_string());
+
+	automaton_states = self.expand(&automaton_states);
+
+	if log {
+	    println!("Computing on input `{input}` . . .");
+	}
+
+	for c in input.chars() {
+	    if log {
+		println!("{:?} reading `{c}`", &automaton_states);
+	    }
+	    if !self.alphabet.contains(&c.to_string()) {
+		if log {
+		    eprintln!("Warning: Symbol {c} is not in alphabet {:?}", self.alphabet);
+		}
+		break;
+	    }
+	    automaton_states = self.move_set(&mut automaton_states, &c.to_string());
+	    if log {
+		println!("=> {:?}", automaton_states);
+		if automaton_states.is_empty() {
+		    eprintln!("Early aborting computation because automaton lost all state");
+		    break;
+		}
+	    }
+
+	}
+
+	let mut result = ComputationResult::Reject;
+	for state in &self.accept_states {
+	    if automaton_states.contains(state) {
+		result = ComputationResult::Accept;
+		break;
+	    }
+	}
+
+	if log {
+	    eprintln!("{:?}ed input `{input}`", result);
+	}
+
+	result
     }
 }
