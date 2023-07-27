@@ -18,7 +18,7 @@ pub enum ComputationResult {
 }
 
 impl NFA {
-    pub fn new(is_deterministic: bool) -> NFA {
+    fn new(is_deterministic: bool) -> NFA {
 	NFA {
 	    states: HashSet::new(),
 	    alphabet: HashSet::new(),
@@ -30,9 +30,12 @@ impl NFA {
 	}
     }
 
-    pub fn init_new(states: &[&str], alphabet: &[&str], transition_function: &[(&str, &str, &[&str])], start_state: &str, accept_states: &[&str], is_deterministic: bool) -> NFA {
-	let mut states_set = states.iter().map(|x| String::from(*x)).collect::<HashSet<String>>();
-	let mut alphabet_set = alphabet.iter().map(|x| String::from(*x)).collect::<HashSet<String>>();
+    pub fn init_new(states: &[&str], alphabet: &[&str], transition_function: &[(&str, &str, &[&str])], start_state: &str, accept_states: &[&str]) -> NFA {
+	// Ignore additional elements in parameter `alphabet`
+	// Ignore additional elements in paramater `states`
+
+	let mut states_set = HashSet::<String>::new();
+	let mut alphabet_set = HashSet::<String>::new();
 
 	if !states.contains(&start_state) {
 	    eprintln!("Warning: Start State `{start_state}` is not in the states array");
@@ -49,8 +52,21 @@ impl NFA {
 	);
 
 	let mut function = HashMap::<String, HashMap<String, HashSet<String>>>::new();
+
+	let mut is_deterministic = true;
+	let mut processed_states = HashSet::<&str>::new();
 	for item in transition_function {
 	    let (state, symbol, items) = (item.0, item.1, item.2);
+	    processed_states.insert(state);
+	    alphabet_set.insert(String::from(symbol));
+	    states_set.insert(String::from(state));
+
+	    if is_deterministic {
+		// If there is an empty string transition
+		// then automaton is Nondeterministic.
+		is_deterministic = !symbol.is_empty();
+	    }
+
 	    if !states.contains(&state) {
 		eprintln!("Warning: State `{state}` is not in the states array");
 		eprintln!("Found in transition {:?}", item);
@@ -70,12 +86,42 @@ impl NFA {
 	    items.iter().for_each(
 		|x| {
 		    destination.insert(String::from(*x));
+		    states_set.insert(String::from(*x));
 		    if !states.contains(x) {
 			eprintln!("Warning: State `{x}` is not in the states array");
 			eprintln!("Found in transition {:?}", item);
 		    }
 		}
 	    );
+	}
+
+	if is_deterministic {
+	    // If some states do not have outgoing transitions
+	    // then this automaton is an NFA
+	    if processed_states.len() == states_set.len() {
+		// All states have outgoing transitions.
+
+		for (_, state_map) in &function {
+		    if state_map.len() < alphabet_set.len() {
+			// Some state does not have transitions for all alphabet symbols.
+			is_deterministic = false;
+			break;
+		    }
+		}
+	    }
+
+	}
+
+	for state in states {
+	    if !states_set.contains(*state) {
+		eprintln!("Un-used state `{state}`");
+	    }
+	}
+
+	for symbol in alphabet {
+	    if !alphabet_set.contains(*symbol) {
+		eprintln!("Un-used symbol `{symbol}`");
+	    }
 	}
 
 	NFA {
@@ -221,4 +267,5 @@ impl NFA {
 
 	result
     }
+
 }
