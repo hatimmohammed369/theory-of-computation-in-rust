@@ -42,4 +42,12 @@ impl NFA {
 	    .entry(symbol.to_string())
 	    .or_insert(HashSet::new())
     }
+
+    pub fn add_transition<'a>(&'a mut self, state: &str, symbol: &str, output: impl Iterator<Item = &'a String>) {
+	output.for_each(
+	    |x| {
+		self.symbol_states_set(state, symbol).insert(x.to_string());
+	    }
+	);
+    }
 }
