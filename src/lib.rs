@@ -11,3 +11,19 @@ pub struct NFA {
     pub is_deterministic: bool,
     pub dfa: Option<Box<NFA>>
 }
+
+impl NFA {
+    pub fn new(is_deterministic: bool) -> NFA {
+	NFA {
+	    states: HashSet::new(),
+	    alphabet: HashSet::new(),
+	    transition_function: HashMap::new(),
+	    start_state: String::new(),
+	    accept_states: HashSet::new(),
+	    is_deterministic,
+	    dfa: None
+	}
+    }
+
+    
+}
