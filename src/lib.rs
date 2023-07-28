@@ -1,15 +1,17 @@
 use std::collections::HashSet;
 use std::collections::HashMap;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NFA {
-    pub states: HashSet<String>,
-    pub alphabet: HashSet<String>,
-    pub transition_function: HashMap<String, HashMap<String, HashSet<String>>>,
-    pub start_state: String,
-    pub accept_states: HashSet<String>,
-    pub is_deterministic: bool,
-    pub dfa: Option<Box<NFA>>
+    states: HashSet<String>,
+    alphabet: HashSet<String>,
+    transition_function: HashMap<String, HashMap<String, HashSet<String>>>,
+    start_state: String,
+    accept_states: HashSet<String>,
+    is_deterministic: bool,
+    dfa: RefCell<Rc<Option<Box<NFA>>>>
 }
 
 #[derive(Debug)]
@@ -26,7 +28,7 @@ impl NFA {
 	    start_state: String::new(),
 	    accept_states: HashSet::new(),
 	    is_deterministic,
-	    dfa: None
+	    dfa: RefCell::new(Rc::new(None))
 	}
     }
 
@@ -131,7 +133,7 @@ impl NFA {
 	    start_state: String::from(start_state),
 	    accept_states: accept_states.iter().map(|x| String::from(*x)).collect(),
 	    is_deterministic,
-	    dfa: None
+	    dfa: RefCell::new(Rc::new(None))
 	}
     }
 
@@ -222,7 +224,7 @@ impl NFA {
 	out
     }
 
-    pub fn compute(&mut self, input: &str, log: bool) -> ComputationResult {
+    pub fn compute(&self, input: &str, log: bool) -> ComputationResult {
 	let mut automaton_states = HashSet::new();
 	automaton_states.insert(self.start_state.to_string());
 
@@ -268,4 +270,94 @@ impl NFA {
 	result
     }
 
+    pub fn to_dfa(&self, sink_state: &str) -> Rc<Option<Box<NFA>>> {
+	if self.is_deterministic || self.dfa.borrow().is_some() {
+	    return self.get_dfa();
+	}
+
+	let mut dfa = NFA::new(true);
+
+	let mut dfa_alphabet = self.alphabet.clone();
+	dfa_alphabet.remove("");
+
+	dfa.alphabet = dfa_alphabet.clone();
+
+	let name_style = |x: &HashSet<String>| {
+	    let mut s = String::new();
+	    s.push('<');
+	    s.push_str(&x.iter().map(|x| x.to_string()).collect::<Vec<String>>()[..].join(", "));
+	    s.push('>');
+	    s
+	};
+
+	let start_set = self.expand(&HashSet::from([self.start_state.to_string()]));
+	let start_set = self.expand(&start_set);
+	dfa.start_state = name_style(&start_set);
+
+	let sink_state = sink_state.to_string();
+	let sink_state_set = HashSet::from([sink_state.to_string()]);
+
+	let mut sets: Vec<HashSet<String>> = vec![];
+	sets.push(start_set);
+	let mut begin = 0_usize;
+	loop {
+	    let before = sets.len();
+	    for i in begin..before {
+		let current_set = sets[i].clone();
+		let current_set_name = if current_set.is_empty() {sink_state.to_string()} else {name_style(&current_set)};
+		dfa.states.insert(current_set_name.to_string());
+		for q in &current_set {
+		    if self.accept_states.contains(q) {
+			dfa.accept_states.insert(current_set_name.to_string());
+			break;
+		    }
+		}
+		for symbol in &dfa_alphabet {
+		    let y = self.move_set(&current_set, symbol);
+		    let mut add_set = true;
+		    for s in &sets {
+			if y.is_subset(s) && s.is_subset(&y) {
+			    add_set = false;
+			    break;
+			}
+		    }
+		    if add_set {
+			sets.push(y.clone());
+		    }
+		    if y.is_empty() {
+			dfa.add_transition(&current_set_name, symbol, (&sink_state_set).iter());
+			dfa.add_transition(&current_set_name, symbol, (&sink_state_set).iter());
+		    } else {
+			dfa.states.insert(name_style(&y));
+			for q in &y {
+			    if self.accept_states.contains(q) {
+				dfa.accept_states.insert(name_style(&y));
+				break;
+			    }
+			}
+			dfa.add_transition(&current_set_name, symbol, HashSet::from([name_style(&y)]).iter());
+		    }
+		}
+	    }
+
+	    if before != sets.len() {
+		begin = before;
+	    } else {
+		break;
+	    }
+	}
+
+	*self.dfa.borrow_mut() = Rc::new(Some(Box::new(dfa)));
+	self.get_dfa()
+    }
+
+    pub fn get_dfa(&self) -> Rc<Option<Box<NFA>>> {
+	if self.dfa.borrow().is_none() {
+	    *self.dfa.borrow_mut() = Rc::new(Some(Box::new(self.clone())));
+	}
+	let x = &self.dfa;
+	let x = x.borrow();
+	let x = Rc::clone(&x);
+	x
+    }
 }
