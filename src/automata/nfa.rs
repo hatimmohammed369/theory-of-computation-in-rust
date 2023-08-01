@@ -571,6 +571,20 @@ impl NFA {
     the construction of the hypothetical GNFA (Generalized NFA)
     */
     pub fn to_regular_expression(&self, removal_sequence: &[&str], g_start_state: &str, g_accept_state: &str) -> String {
+	{
+	    let fake_states =
+		removal_sequence
+		.iter()
+		.filter(|s| {
+		    let s = **s;
+		    !self.states.contains(s)
+		})
+		.collect::<Vec<_>>();
+
+	    if !fake_states.is_empty() {
+		panic!("States `{:?}` do not exist!", fake_states);
+	    }
+	}
 	if !self.is_deterministic {
 	    panic!("Invoking automaton must be deterministic");
 	}
