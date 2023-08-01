@@ -352,12 +352,17 @@ impl NFA {
     }
 
     pub fn get_dfa(&self) -> Rc<Option<Box<NFA>>> {
-	if self.dfa.borrow().is_none() {
+	if self.is_deterministic && self.dfa.borrow().is_none() {
 	    *self.dfa.borrow_mut() = Rc::new(Some(Box::new(self.clone())));
 	}
 	let x = &self.dfa;
 	let x = x.borrow();
+
+	// Rc< Option< Box<NFA> > >
 	let x = Rc::clone(&x);
+	if x.is_none() {
+	    panic!("You must call to_dfa first before any call to get_dfa");
+	}
 	x
     }
 
