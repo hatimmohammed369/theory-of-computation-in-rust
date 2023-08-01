@@ -304,35 +304,25 @@ impl NFA {
 	    return out;
 	}
 
-	// Expand the input set
-	for elem in set.iter() {
-	    self.read_symbol_states_set(&elem, "")
-		.unwrap_or(&HashSet::new())
-		.iter()
-		.for_each(
-		    |x| {
-			out.insert(x.to_string());
-		    }
-		);
-	}
-
-	// Expand the resulting expanded input set from the above loop.
+	let mut new_items = out.clone();
 	loop {
-	    // Do this as long as new states appear in each iteration.
-	    let before = out.len();
-	    for elem in set {
-		self.read_symbol_states_set(&elem, "")
-		    .unwrap_or(&HashSet::new())
-		    .iter()
-		    .for_each(
-			|x| {
-			    out.insert(x.to_string());
-			}
-		    );
+	    let new_items_iter = new_items.clone();
+	    let new_items_iter = new_items_iter.iter();
+	    new_items.clear();
+
+	    for elem in new_items_iter {
+		if let Some(empty_string_set) = self.read_symbol_states_set(elem, "") {
+		    empty_string_set
+			.iter()
+			.for_each(|s| {
+			    if out.insert(s.to_string()) {
+				new_items.insert(s.to_string());
+			    }
+			});
+		}
 	    }
-	    if before == out.len() {
-		// No new states, we expanded as far as possible
-		// STOP
+
+	    if new_items.is_empty() {
 		break;
 	    }
 	}
@@ -345,10 +335,6 @@ impl NFA {
     when reading symbol in paramter (symbol)
     */
     fn move_set(&self, set: &HashSet<String>, symbol: &str) -> HashSet<String> {
-	if symbol == "" {
-	    return self.expand(set);
-	}
-	
 	let mut out = HashSet::new();
 
 	for q in set {
