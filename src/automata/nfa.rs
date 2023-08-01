@@ -766,4 +766,35 @@ impl NFA {
 
 	final_expression
     }
+
+    pub fn star(&self, star_state: &str) -> NFA {
+	if self.states.contains(star_state) {
+	    panic!("The star state `{star_state}` is already present");
+	}
+
+	let mut self_star = self.clone();
+
+	// Leaving is_deterministic true will hold method (expand) from working
+	// which is essential when we have empty string transitions
+	self_star.is_deterministic = false;
+
+	self_star.alphabet.insert( String::new() ); // in case missing
+	self_star.states.insert( String::from(star_state) );
+	self_star.start_state = String::from(star_state); // set the new start state
+	self_star.accept_states.insert( String::from(star_state) ); // mark the new state as accepting
+
+	// Create an empty string transition from the new (start) state
+	// to the old start state
+	self_star.add_transition(star_state, "", vec![self.start_state.to_string()].iter());
+
+	self.accept_states.iter().for_each(
+	    |state| {
+		// For each original accepting state (q),
+		// create an empty string transition from q to the old start state.
+		self_star.add_transition(state, "", vec![self.start_state.to_string()].iter());
+	    }
+	);
+
+	self_star
+    }
 }
