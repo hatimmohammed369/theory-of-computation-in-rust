@@ -360,4 +360,301 @@ impl NFA {
 	let x = Rc::clone(&x);
 	x
     }
+
+    pub fn star_regex(&self, expr: &Option<&str>) -> String {
+	let mut expr = expr.unwrap_or_default().to_string();
+	if expr.is_empty() {
+	    return String::new();
+	}
+
+	if self.alphabet.contains(&expr) {
+	    expr.push('*');
+	} else if expr.starts_with("(") && expr.ends_with(")") {
+	    let mut nesting = 0;
+	    for (idx, ch) in expr.char_indices() {
+		if ch == '(' {nesting += 1;}
+		else if ch == ')' {nesting -= 1;}
+
+		if nesting == 0 && idx != expr.len()-1 {
+		    nesting = -1;
+		    break;
+		}
+	    }
+
+	    if nesting == -1 {
+		expr = format!("({expr})*");
+	    } else {
+		expr.push('*');
+	    }
+	} else {
+	    expr = format!("({expr})*");
+	}
+	expr
+    }
+
+    pub fn union_regexes(exprs: &[Option<&str>]) -> Option<String> {
+	let mut union_expr = String::new();
+	let mut all_none = true;
+	let mut all_empty = true;
+	for expr in exprs {
+	    if expr.is_none() {
+		continue;
+	    }
+	    all_none = false;
+
+	    let mut expr = expr.as_ref().unwrap().to_string();
+	    if expr.len() > 0 {
+		all_empty = false;
+	    }
+
+	    if
+		expr.len() >= 2 &&
+		    &expr[expr.len()-2..] == "||" &&
+		    expr.is_empty()
+	    {
+		continue;
+	    }
+
+	    let mut nesting = 0;
+	    for ch in expr.chars() {
+		if ch == '(' {nesting += 1;}
+		else if ch == ')' {nesting -= 1;}
+
+		if nesting == 0 && ch == '|' {
+		    expr = format!("({expr})");
+		    break;
+		}
+	    }
+
+	    expr = format!("{expr}|");
+	    union_expr.push_str(&expr);
+	}
+
+	if all_none {
+	    return None;
+	} else if all_empty {
+	    return Some(String::new());
+	}else {
+	    if !union_expr.is_empty() {
+		union_expr.pop();
+	    }
+	}
+
+	Some(union_expr)
+    }
+
+    pub fn concat_regexes(exprs: &[Option<&str>]) -> Option<String> {
+	let mut all_empty = true;
+	let mut concat_expr = String::new();
+	for expr in exprs {
+	    if expr.is_none() {
+		return None;
+	    }
+
+	    let mut expr = expr.as_ref().unwrap().to_string();
+	    if expr.is_empty() {
+		continue;
+	    }
+	    all_empty = false;
+
+	    let mut nesting = 0;
+	    for ch in expr.chars() {
+		if ch == '(' {nesting += 1;}
+		else if ch == ')' {nesting -= 1;}
+
+		if nesting == 0 && ch == '|' {
+		    expr = format!("({expr})");
+		    break;
+		}
+	    }
+
+	    concat_expr.push_str(&expr);
+	}
+
+	if all_empty {
+	    return Some(String::new());
+	}
+
+	Some(concat_expr)
+    }
+
+    pub fn to_regular_expression(&self, removal_sequence: &[&str], g_start_state: &str, g_accept_state: &str) -> String {
+	if !self.is_deterministic {
+	    panic!("Invoking automaton must be deterministic");
+	}
+	if self.states.contains(g_start_state) {
+	    panic!("Choose another start state");
+	}
+	if self.states.contains(g_accept_state) {
+	    panic!("Choose another accept state");
+	}
+	{
+	    let missing =
+		self.states
+		.iter()
+		.filter(|elem| {
+		    !removal_sequence.contains(&elem.as_str())
+		})
+		.collect::<Vec<&String>>();
+	    if !missing.is_empty() {
+		panic!(
+		    "States `{:?}` are missing from removal sequence",
+		    missing
+		);
+	    }
+	}
+	let mut function =
+	    HashMap::<(&str, &str), RefCell<Option<String>>>::new();
+
+	function.insert((g_start_state, g_accept_state), RefCell::new( Option::<String>::None ));
+
+	for state in &(self.states) {
+	    function.insert((g_start_state, state), RefCell::new( Option::<String>::None ));
+	    function.insert((state, g_accept_state), RefCell::new( Option::<String>::None ));
+	}
+	function.insert((g_start_state, &self.start_state), RefCell::new( Some( String::new() ) ));
+
+	for accept_state in &(self.accept_states) {
+	    function.insert((accept_state.as_str(), g_accept_state), RefCell::new( Some( String::new() ) ));
+	}
+
+	for state in &(self.states) {
+	    for another in &(self.states) {
+		let mut transitions = Vec::<Option::<String>>::new();
+		if let Some(state_map) = self.transition_function.get(state) {
+		    transitions =
+			state_map
+			.iter()
+			.filter(|(_, symbol_set)| {
+			    symbol_set.contains(another)
+			})
+			.map(|(symbol, _)| {
+			    Some(symbol.to_string())
+			})
+			.collect::<_>();
+		} else {
+		    transitions.push( Option::<String>::None );
+		}
+
+		let transitions =
+		    transitions
+		    .iter()
+		    .map(
+			|value| {
+			    match value {
+				Some(x) => Some(x.as_str()),
+				None => None
+			    }
+			}
+		    )
+		    .collect::<Vec::<Option::<&str>>>();
+
+		let combined =
+		    NFA::union_regexes(
+			&transitions[..]
+		    );
+		function.insert((state, another), RefCell::new(combined));
+	    }
+	}
+
+	let phi = RefCell::new(Option::<String>::None);
+
+	let mut senders = self.states.clone();
+	senders.insert(g_start_state.to_string());
+
+	let mut receivers = self.states.clone();
+	receivers.insert(g_accept_state.to_string());
+
+	for leaving in removal_sequence {
+	    let leaving = *leaving;
+
+	    senders.remove(leaving);
+	    receivers.remove(leaving);
+
+	    let leaving_self_loop = // &RefCell<Option<String>>
+		function
+		.get(&(leaving, leaving))
+		.unwrap_or(&phi);
+	    let leaving_self_loop =
+		self.star_regex(
+		    &leaving_self_loop.borrow().as_deref()
+		);
+	    let leaving_self_loop =
+		Some(leaving_self_loop);
+
+	    for sender in &senders {
+		let sender_to_leaving =
+		    function
+		    .get(&(sender.as_str(), leaving))
+		    .unwrap_or(&phi);
+		if sender_to_leaving.borrow().is_none() {
+		    continue;
+		}
+
+		for receiver in &receivers {
+		    let leaving_to_receiver =
+			function
+			.get(&(leaving, receiver.as_str()))
+			.unwrap_or(&phi);
+		    if leaving_to_receiver.borrow().is_none() {
+			continue;
+		    }
+
+		    let sender_to_receiver =
+			function
+			.get(&(sender.as_str(), receiver.as_str()))
+			.unwrap_or(&phi);
+
+		    let through_leaving =
+			NFA::concat_regexes(
+			    &[
+				sender_to_leaving.borrow().as_deref(),
+				leaving_self_loop.as_deref(),
+				leaving_to_receiver.borrow().as_deref()
+			    ]
+			);
+
+		    let new_regex =
+			NFA::union_regexes(
+			    &[
+				sender_to_receiver.borrow().as_deref(),
+				through_leaving.as_deref()
+			    ]
+			);
+
+		    let regex =
+			function
+			.get(&(sender.as_str(), receiver.as_str()))
+			.unwrap_or(&phi);
+		    *(regex.borrow_mut()) = new_regex;
+		}
+	    }
+	}
+
+	// Option<&RefCell<Option<String>>>
+	let final_expression =
+	    function
+	    .get(&(g_start_state, g_accept_state));
+
+	// &RefCell<Option<String>>
+	let final_expression =
+	    final_expression.unwrap();
+
+	// Ref<_, Option<String>>
+	let final_expression =
+	    final_expression.borrow();
+
+	// Option<&String>
+	let final_expression =
+	    final_expression.as_ref();
+
+	// &String
+	let final_expression =
+	    final_expression.unwrap();
+
+	let final_expression =
+	    final_expression.to_string();
+
+	final_expression
+    }
 }
