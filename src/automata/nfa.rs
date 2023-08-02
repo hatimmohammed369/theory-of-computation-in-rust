@@ -305,7 +305,7 @@ impl NFA {
 	}
 
 	let mut new_items = out.clone();
-	loop {
+	while !new_items.is_empty() {
 	    let new_items_iter = new_items.clone();
 	    let new_items_iter = new_items_iter.iter();
 	    new_items.clear();
@@ -320,10 +320,6 @@ impl NFA {
 			    }
 			});
 		}
-	    }
-
-	    if new_items.is_empty() {
-		break;
 	    }
 	}
 
@@ -782,5 +778,65 @@ impl NFA {
 	);
 
 	self_star
+    }
+
+    pub fn union<'a>(automata: impl Iterator<Item = &'a NFA>, union_nfa_start_state: &str) -> NFA {
+	let mut union_nfa = NFA::new_empty_nfa(false);
+	union_nfa.start_state = union_nfa_start_state.to_string();
+	union_nfa.states.insert(
+	    union_nfa_start_state.to_string()
+	);
+
+	let mut counter = 0usize;
+	for automaton in automata {
+	    let style = |s: &str, k: usize| {
+		format!("(A{k}.{s})")
+	    };
+
+	    // Add an empty string transition from the new start state
+	    // to the start state of (automaton).
+	    union_nfa
+		.add_transition(
+		    union_nfa_start_state, "",
+		    vec![ style(automaton.start_state.as_str(), counter) ].iter()
+		);
+
+	    automaton.alphabet.iter().for_each(|x| {
+		union_nfa.alphabet.insert(x.to_string());
+	    });
+
+	    automaton.states.iter().for_each(|s| {
+		let name = style(s, counter);
+
+		union_nfa.states.insert(name.to_string());
+
+		if let Some(state_map) = automaton.read_state_symbols_map(s) {
+		    let mut adjusted_state_map =
+			HashMap::<String, HashSet::<String>>::new();
+
+		    for (symbol, symbol_set) in state_map {
+			let symbol_set =
+			    symbol_set
+			    .iter()
+			    .map(|elem| {
+				style(elem.as_str(), counter)
+			    })
+			    .collect::<HashSet::<String>>();
+			adjusted_state_map.insert(symbol.to_string(), symbol_set);
+		    }
+		    
+		    union_nfa.transition_function.insert(name, adjusted_state_map);
+		}
+	    });
+
+	    automaton.accept_states.iter().for_each(|s| {
+		let name = style(s, counter);
+		union_nfa.accept_states.insert(name);
+	    });
+
+	    counter += 1;
+	}
+
+	union_nfa
     }
 }
