@@ -801,36 +801,64 @@ impl NFA {
 	self_star
     }
 
+    /*
+    Compute the union of a finite set of NFAs
+    Their union is defined like follow:
+    Create a distinguished non-accepting start state S for the union automaton
+    state S has empty string transition to each automaton in given the set
+    and the accept states of the union automaton are exaclty those of the given automata
+    */
     pub fn union<'a>(automata: impl Iterator<Item = &'a NFA>, union_nfa_start_state: &str) -> NFA {
 	let mut union_nfa = NFA::new_empty_nfa(false);
+
+	// Set the distinguished non-accepting start state for the union automaton.
 	union_nfa.start_state = union_nfa_start_state.to_string();
+
+	// add the new start state to the states sets of the union automaton.
 	union_nfa.states.insert(
 	    union_nfa_start_state.to_string()
 	);
 
+	/*
+	This closure is used to format states names to avoid name clashes
+	Also such that when the final union automaton is computing over some input
+	We can see how each of its original components is acting
+	 */
+	let style = |s: &str, k: usize| {
+	    format!("(A{k}.{s})")
+	};
+
 	let mut counter = 0usize;
 	for automaton in automata {
-	    let style = |s: &str, k: usize| {
-		format!("(A{k}.{s})")
-	    };
-
 	    // Add an empty string transition from the new start state
-	    // to the start state of (automaton).
+	    // to the start state of currently processed automaton.
 	    union_nfa
 		.add_transition(
 		    union_nfa_start_state, "",
 		    vec![ style(automaton.start_state.as_str(), counter) ].iter()
 		);
 
+	    // Add the alphabet of the currently processed automaton
 	    automaton.alphabet.iter().for_each(|x| {
 		union_nfa.alphabet.insert(x.to_string());
 	    });
 
+	    /*
+	    Add all states of the currenly processed automaton but with their names
+	    styled by closure (style) defined above this loop header
+	    */
 	    automaton.states.iter().for_each(|s| {
+		// style state name
 		let name = style(s, counter);
 
+		// insert the styled name into the states set of the union automaton
 		union_nfa.states.insert(name.to_string());
 
+		/*
+		If this state in currently process automaton has some transitions
+		then also style the states in its transitions using the same index
+		since they all belong to the currently processed automaton.
+		*/
 		if let Some(state_map) = automaton.read_state_symbols_map(s) {
 		    let mut adjusted_state_map =
 			HashMap::<String, HashSet::<String>>::new();
@@ -846,18 +874,126 @@ impl NFA {
 			adjusted_state_map.insert(symbol.to_string(), symbol_set);
 		    }
 
+		    // Adjoin the (state symbols map) of currently processed state.
 		    union_nfa.transition_function.insert(name, adjusted_state_map);
 		}
 	    });
 
+	    /*
+	    Add all accepting states of the current automaton
+	    to the accept states set of the union automaton
+	    because the union automaton accepts only if at least
+	    one of its components do.
+	    */
 	    automaton.accept_states.iter().for_each(|s| {
 		let name = style(s, counter);
 		union_nfa.accept_states.insert(name);
 	    });
 
+	    // Increment counter used in state names styling
 	    counter += 1;
 	}
 
 	union_nfa
+    }
+
+    /*
+    Compute the concatentation automaton of a sequence of NFAs
+    Their concatentation is defined like follow:
+    The start state of the concatenation automaton is the start state of the first NFA
+    we can talk first, second, third because the input is sequence not a set like method (union)
+    The concatenation automaton accepts only if its input is passed through
+    the orginal NFAs sequence such that each NFA along the ways accepts a part of the input
+    and the last NFA accepts a part of the input
+    Put another way, the concatenation automaton of a sequence of N automata accepts its input
+    only if the input can be broken into N piece with the i-th automaton from the sequence accepts
+    the i-th part of the input for all 1 <= i <= N.
+    */
+    pub fn concatenate<'a>(automata: &[&NFA]) -> NFA {
+        let style =
+	    |s: &str, k: usize| format!("(A{k}.{s})");
+
+        let mut concat_nfa = NFA::new_empty_nfa(false);
+
+	/*
+	The start state in the concatenation automaton is
+	the start state of the first automaton in the given NFAs sequence.
+	*/
+        concat_nfa.start_state = style(&automata[0].start_state, 0);
+
+        let mut counter = 0usize;
+        for i in 0..automata.len() {
+            let automaton = automata[i];
+
+	    // Add the alphabet of the currently processed automaton
+            automaton.alphabet.iter().for_each(|x| {
+                concat_nfa.alphabet.insert(String::from(x));
+            });
+
+	    /*
+	    Add all states of the currenly processed automaton but with their names
+	    styled by closure (style) defined above this loop header
+	    */
+            automaton.states.iter().for_each(|s| {
+		// style state name
+                let name = style(s, counter);
+
+		// insert the styled name into the states set of the union automaton
+                concat_nfa.states.insert(String::from(&name));
+
+		/*
+		If this state in currently process automaton has some transitions
+		then also style the states in its transitions using the same index
+		since they all belong to the currently processed automaton.
+		*/
+                if let Some(state_map) = automaton.read_state_symbols_map(s) {
+                    let mut adjusted_state_map = HashMap::<String, HashSet<String>>::new();
+
+                    for (symbol, symbol_set) in state_map {
+                        let symbol_set = symbol_set
+                            .iter()
+                            .map(|elem| style(elem.as_str(), counter))
+                            .collect::<HashSet<String>>();
+                        adjusted_state_map.insert(symbol.to_string(), symbol_set);
+                    }
+
+		    // Adjoin the (state symbols map) of currently processed state.
+                    concat_nfa
+                        .transition_function
+                        .insert(name, adjusted_state_map);
+                }
+            });
+
+            if i + 1 < automata.len() {
+		/*
+		Create an empty string transition from the accept states
+		of the current automaton to the start state of the next.
+		*/
+                let next = automata[i + 1];
+                for accept_state in &automaton.accept_states {
+                    let name = style(&accept_state, counter);
+                    concat_nfa.add_transition(
+                        &name,
+                        "",
+                        &mut [style(&next.start_state, i + 1)].iter(),
+                    );
+                }
+            }
+
+	    // Increment counter used in state names styling
+            counter += 1;
+        }
+
+	/*
+	Mark the accept states of the last automaton
+	as the only accept states of the whole concatenation automata
+	*/
+        for accept_state in &automata.last().unwrap().accept_states {
+            concat_nfa
+                .accept_states
+                .insert(style(accept_state, automata.len() - 1));
+        }
+
+        concat_nfa
     }
 }
