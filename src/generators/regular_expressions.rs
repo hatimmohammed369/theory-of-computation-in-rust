@@ -26,7 +26,7 @@ pub fn star_string_regex(automaton: &NFA, expr: &Option<&str>) -> String {
 	just append the `*`.
 	*/
 	expr.push('*');
-    } else if expr.starts_with("(") && expr.ends_with(")") {
+    } else if expr.starts_with('(') && expr.ends_with(')') {
 	/*
 	If the regular expressions starts and ends with `(` and `)`
 	then we must check if the `(` matches the `)`
@@ -110,7 +110,7 @@ pub fn union_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
 	all_none = false;
 
 	let mut expr = expr.as_ref().unwrap().to_string();
-	if expr.len() > 0 {
+	if !expr.is_empty() {
 	    // Now we know at one expression is not the empty string.
 	    all_empty = false;
 	}
@@ -157,16 +157,14 @@ pub fn union_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
     } else if all_empty {
 	// All expressions are empty, just return the empty string
 	return Some(String::new());
-    }else {
-	if !union_expr.is_empty() {
-	    /*
-	    In each iteration of the above loop, we append the expression followed by `|`
-	    thus the last expression will append a redundant `|` which must be removed
-	    otherwise this redundant `|` will imply this expression unions the empty string
-	    */
-	    union_expr.pop();
-	}
-    }
+    }else if !union_expr.is_empty() {
+    	    /*
+    	    In each iteration of the above loop, we append the expression followed by `|`
+    	    thus the last expression will append a redundant `|` which must be removed
+    	    otherwise this redundant `|` will imply this expression unions the empty string
+    	    */
+    	    union_expr.pop();
+    	}
 
     Some(union_expr)
 }
