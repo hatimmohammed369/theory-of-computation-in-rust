@@ -280,8 +280,24 @@ impl NFA {
 	);
     }
 
+    pub fn read_states(&self) -> &HashSet<String> {
+	&self.states
+    }
+
     pub fn read_alphabet(&self) -> &HashSet<String> {
 	&self.alphabet
+    }
+
+    pub fn read_transition_function(&self) -> &HashMap<String, HashMap<String, HashSet<String>>> {
+	&self.transition_function
+    }
+
+    pub fn read_start_state(&self) -> &str {
+	&self.start_state
+    }
+
+    pub fn read_accept_states(&self) -> &HashSet<String> {
+	&self.accept_states
     }
 
     pub fn is_deterministic(&self) -> bool {

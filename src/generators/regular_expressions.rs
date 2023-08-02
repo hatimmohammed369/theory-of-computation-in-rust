@@ -171,7 +171,7 @@ pub fn union_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
     Some(union_expr)
 }
 
-// Compute the concatination of a group of regular expressions
+// Compute the concatenation of a group of regular expressions
 pub fn concat_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
     /*
     All expressions are Option::Some(""), equivalently, all are the empty string
