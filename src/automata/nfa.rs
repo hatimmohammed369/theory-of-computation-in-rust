@@ -454,73 +454,81 @@ impl NFA {
 
 	dfa.alphabet = dfa_alphabet.clone();
 
-	let name_style = |x: &HashSet<String>| {
+	let mut strings = Vec::<(HashSet::<String>, String)>::new();
+	let mut stringify_set = |x: &HashSet<String>| {
+	    for (set, string) in &strings {
+		if set.is_subset(x) && x.is_subset(set) {
+		    return String::from(string);
+		}
+	    }
 	    let mut s = String::new();
 	    s.push('<');
 	    s.push_str(&x.iter().map(|x| x.to_string()).collect::<Vec<String>>()[..].join(", "));
 	    s.push('>');
+	    strings.push((x.clone(), s.to_string()));
 	    s
 	};
 
 	let start_set = self.expand(&HashSet::from([self.start_state.to_string()]));
-	let start_set = self.expand(&start_set);
-	dfa.start_state = name_style(&start_set);
+	dfa.start_state = stringify_set(&start_set);
 
-	let sink_state = sink_state.to_string();
+	let sink_state = String::from(sink_state);
 
 	// The unique sink state set.
-	let sink_state_set = HashSet::from([sink_state.to_string()]);
+	let sink_state_set =
+	    HashSet::from([sink_state.to_string()]);
+	let sink_state_set_name =
+	    stringify_set(&sink_state_set);
 
-	let mut sets_container: Vec<HashSet<String>> = vec![];
-	sets_container.push(start_set);
-	let mut begin = 0_usize;
-	loop {
-	    let before = sets_container.len();
-	    for i in begin..before {
-		let current_set = sets_container[i].clone();
-		let current_set_name = if current_set.is_empty() {sink_state.to_string()} else {name_style(&current_set)};
-		dfa.states.insert(current_set_name.to_string());
-		for q in &current_set {
-		    if self.accept_states.contains(q) {
-			dfa.accept_states.insert(current_set_name.to_string());
-			break;
-		    }
-		}
-		for symbol in &dfa_alphabet {
-		    let y = self.move_set(&current_set, symbol);
-		    let mut add_set = true;
-		    for s in &sets_container {
-			if y.is_subset(s) && s.is_subset(&y) {
-			    add_set = false;
-			    break;
-			}
-		    }
-		    if add_set {
-			// We found a new set
-			sets_container.push(y.clone());
-		    }
-		    if y.is_empty() {
-			// The result set is empty
-			// add the unique (sink-state set)
-			dfa.add_transition(&current_set_name, symbol, (&sink_state_set).iter());
-			dfa.add_transition(&current_set_name, symbol, (&sink_state_set).iter());
-		    } else {
-			dfa.states.insert(name_style(&y));
-			for q in &y {
-			    if self.accept_states.contains(q) {
-				dfa.accept_states.insert(name_style(&y));
-				break;
-			    }
-			}
-			dfa.add_transition(&current_set_name, symbol, HashSet::from([name_style(&y)]).iter());
-		    }
-		}
+	{
+	    dfa.states.insert( String::from(&sink_state_set_name) );
+	    let destination =
+		dfa.write_state_symbols_map(&sink_state_set_name);
+	    for symbol in &dfa_alphabet {
+		destination.insert(String::from(symbol), HashSet::from( [ String::from(&sink_state_set_name) ] ));
 	    }
+	}
 
-	    if before != sets_container.len() {
-		begin = before;
-	    } else {
-		break;
+	let mut new_items = vec![ start_set.clone() ];
+	while !new_items.is_empty() {
+	    let new_items_iter = new_items.clone();
+	    let new_items_iter = new_items_iter.iter();
+	    new_items.clear();
+
+	    for new_set in new_items_iter {
+		let name = stringify_set(new_set);
+		dfa.states.insert(name.to_string());
+		if new_set.intersection(&self.accept_states).next().is_some() {
+		    // There's at least one accept state.
+		    dfa.accept_states.insert( String::from(&name) );
+		}
+
+		let state_symbols_map =
+		    dfa.write_state_symbols_map(&name);
+
+		let has_empty_symbols_map =
+		    state_symbols_map.is_empty();
+
+		for symbol in &dfa_alphabet {
+		    let moved_new_set = self.move_set(new_set, symbol);
+		    let moved_new_set_name =
+			stringify_set(&moved_new_set);
+
+		    if has_empty_symbols_map {
+			new_items.push(moved_new_set.clone());
+		    }
+
+		    state_symbols_map
+			.entry( String::from(symbol) )
+			.or_insert(HashSet::new())
+			.insert({
+			    if moved_new_set.is_empty() {
+				String::from(&sink_state_set_name)
+			    } else {
+				String::from(&moved_new_set_name)
+			    }
+			});
+		}
 	    }
 	}
 
@@ -539,9 +547,6 @@ impl NFA {
 
 	// Rc< Option< Box<NFA> > >
 	let x = Rc::clone(&x);
-	if x.is_none() {
-	    panic!("You must call to_dfa first before any call to get_dfa");
-	}
 
 	x
     }
@@ -824,7 +829,7 @@ impl NFA {
 			    .collect::<HashSet::<String>>();
 			adjusted_state_map.insert(symbol.to_string(), symbol_set);
 		    }
-		    
+
 		    union_nfa.transition_function.insert(name, adjusted_state_map);
 		}
 	    });
