@@ -11,7 +11,7 @@ Each computation function in all automata must return this type
 Accept: the automaton accepted its input
 Reject: the automaton rejected its input
 */
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ComputationResult {
     Accept, Reject
 }

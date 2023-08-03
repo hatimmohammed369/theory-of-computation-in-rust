@@ -20,7 +20,7 @@ pub fn star_string_regex(automaton: &NFA, expr: &Option<&str>) -> String {
 	return String::new();
     }
 
-    if automaton.read_alphabet().contains(&expr) {
+    if automaton.read_alphabet().contains(&expr.chars().next().unwrap()) {
 	/*
 	If this regular expression is just an alphabet symbol
 	just append the `*`.

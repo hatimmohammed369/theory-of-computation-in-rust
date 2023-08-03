@@ -13,7 +13,7 @@ pub struct NFA {
     states: HashSet<String>,
 
     // automaton alphabet
-    alphabet: HashSet<String>,
+    alphabet: HashSet<char>,
     /*
     A Note on the alphabet:
     Even though any string is allowed to be an alphabet symbol
@@ -34,7 +34,7 @@ pub struct NFA {
     also when in state (r) we can do an empty string transition taking us to states {t, v}
     and so forth . . .
      */
-    transition_function: HashMap<String, HashMap<String, HashSet<String>>>,
+    transition_function: HashMap<String, HashMap<char, HashSet<String>>>,
 
     // The distinguished starting state.
     start_state: String,
@@ -71,13 +71,13 @@ impl NFA {
 	If an alphabet symbol is in parameter (alphabet)
 	but it is never used in parameter (transition_function) ignore it and emit a warning
 	 */
-	alphabet: &[&str],
+	alphabet: &[char],
 
 	/*
 	Each element is of the form
 	(state-q, alphabet-symbol-x, &[states reachable from (q) when reading (x)])
 	 */
-	transition_function: &[(&str, &str, &[&str])],
+	transition_function: &[(&str, char, &[&str])],
 
 	start_state: &str,
 	accept_states: &[&str],
@@ -89,7 +89,7 @@ impl NFA {
 	let mut states_set = HashSet::<String>::new();
 
 	// Accumulate (used) alphabet symbols which are those appearing in parameter (transition_function)
-	let mut alphabet_set = HashSet::<String>::new();
+	let mut alphabet_set = HashSet::<char>::new();
 
 	if !states.contains(&start_state) {
 	    eprintln!("Warning: Start State `{start_state}` is not in the states array");
@@ -107,7 +107,7 @@ impl NFA {
 	);
 
 	// The final transition function of the new object.
-	let mut function = HashMap::<String, HashMap<String, HashSet<String>>>::new();
+	let mut function = HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
 	let mut computed_is_deterministic_flag = true;
 
@@ -121,7 +121,8 @@ impl NFA {
 	for item in transition_function {
 	    let (state, symbol, items) = (item.0, item.1, item.2);
 	    processed_states.insert(state);
-	    alphabet_set.insert(String::from(symbol)); // mark this symbol as used.
+	    alphabet_set.insert(symbol);
+
 	    states_set.insert(String::from(state)); // mark this state as used.
 
 	    if infer_type {
@@ -129,7 +130,7 @@ impl NFA {
 		if computed_is_deterministic_flag {
 		    // If there is an empty string transition
 		    // then automaton is Nondeterministic.
-		    computed_is_deterministic_flag = !symbol.is_empty();
+		    computed_is_deterministic_flag = symbol != '\0';
 		}
 	    }
 
@@ -147,8 +148,7 @@ impl NFA {
 	    let destination =
 		function
 		.entry(String::from(state)).or_insert(HashMap::new())
-		.entry(String::from(symbol)).or_insert(HashSet::new());
-
+		.entry(symbol).or_insert(HashSet::new());
 	    items.iter().for_each(
 		|x| {
 		    destination.insert(String::from(*x));
@@ -185,7 +185,7 @@ impl NFA {
 	}
 
 	for symbol in alphabet {
-	    if !alphabet_set.contains(*symbol) {
+	    if !alphabet_set.contains(symbol) {
 		eprintln!("Un-used symbol `{symbol}`");
 	    }
 	}
@@ -219,7 +219,7 @@ impl NFA {
     /*
     Access a state map for writing
      */
-    pub fn write_state_symbols_map(&mut self, state: &str) -> &mut HashMap<String, HashSet<String>> {
+    pub fn write_state_symbols_map(&mut self, state: &str) -> &mut HashMap<char, HashSet<String>> {
 	if self.states.insert(state.to_string()) {
 	    eprintln!("Warning: new state `{state}`");
 	}
@@ -233,20 +233,20 @@ impl NFA {
     Access a particular value in a state map for writing
     This particular value is those states reachable from parameter (state) when reading parameter (symbol).
      */
-    pub fn write_symbol_states_set(&mut self, state: &str, symbol: &str) -> &mut HashSet<String> {
+    pub fn write_symbol_states_set(&mut self, state: &str, symbol: char) -> &mut HashSet<String> {
 	if self.states.insert(state.to_string()) {
 	    eprintln!("Warning: new state `{state}`");
 	}
 
 	self.write_state_symbols_map(state)
-	    .entry(symbol.to_string())
+	    .entry(symbol)
 	    .or_insert(HashSet::new())
     }
 
     /*
     Access a state map for reading
      */
-    pub fn read_state_symbols_map(&self, state: &str) -> Option<&HashMap<String, HashSet<String>>> {
+    pub fn read_state_symbols_map(&self, state: &str) -> Option<&HashMap<char, HashSet<String>>> {
 	self.transition_function.get(state)
     }
 
@@ -255,9 +255,9 @@ impl NFA {
     Access a particular value in a state map for reading
     This particular value is those states reachable from parameter (state) when reading parameter (symbol).
      */
-    pub fn read_symbol_states_set(&self, state: &str, symbol: &str) -> Option<&HashSet<String>> {
+    pub fn read_symbol_states_set(&self, state: &str, symbol: char) -> Option<&HashSet<String>> {
 	match self.read_state_symbols_map(state) {
-	    Some(state_symbols_map) => state_symbols_map.get(symbol),
+	    Some(state_symbols_map) => state_symbols_map.get(&symbol),
 	    None => None
 	}
     }
@@ -265,7 +265,7 @@ impl NFA {
     /*
     Add a transition for a specific state
      */
-    pub fn add_transition<'a>(&'a mut self, state: &str, symbol: &str, output: impl Iterator<Item = &'a String>) {
+    pub fn add_transition<'a>(&'a mut self, state: &str, symbol: char, output: impl Iterator<Item = &'a String>) {
 	if self.states.insert(state.to_string()) {
 	    eprintln!("Warning: new state `{state}`");
 	}
@@ -282,11 +282,11 @@ impl NFA {
 	&self.states
     }
 
-    pub fn read_alphabet(&self) -> &HashSet<String> {
+    pub fn read_alphabet(&self) -> &HashSet<char> {
 	&self.alphabet
     }
 
-    pub fn read_transition_function(&self) -> &HashMap<String, HashMap<String, HashSet<String>>> {
+    pub fn read_transition_function(&self) -> &HashMap<String, HashMap<char, HashSet<String>>> {
 	&self.transition_function
     }
 
@@ -325,7 +325,7 @@ impl NFA {
 	    new_items.clear();
 
 	    for elem in new_items_iter {
-		if let Some(empty_string_set) = self.read_symbol_states_set(elem, "") {
+		if let Some(empty_string_set) = self.read_symbol_states_set(elem, '\0') {
 		    empty_string_set
 			.iter()
 			.for_each(|s| {
@@ -344,7 +344,7 @@ impl NFA {
     Return all states reachable from each state (q) in parameter (set)
     when reading symbol in paramter (symbol)
      */
-    fn move_set(&self, set: &HashSet<String>, symbol: &str) -> HashSet<String> {
+    fn move_set(&self, set: &HashSet<String>, symbol: char) -> HashSet<String> {
 	let mut out = HashSet::new();
 
 	for q in set {
@@ -371,7 +371,7 @@ impl NFA {
     /*
     Compute on some input.
      */
-    pub fn compute(&self, input: &str, log: bool) -> ComputationResult {
+    pub fn compute(&self, input: &str, log: bool) -> Result<ComputationResult, String> {
 	let mut automaton_states = HashSet::new();
 
 	// We start with ... the start state
@@ -380,11 +380,13 @@ impl NFA {
 	// expand the start state
 	automaton_states = self.expand(&automaton_states);
 
+	eprintln!();
+	eprintln!("########################################");
 	if log {
-	    println!("Computing on input `{input}` . . .");
+	    println!("Computing on input `{input}` . . .\n");
 	}
 
-	for c in input.chars() {
+	for next_symbol in input.chars() {
 	    /*
 	    Here, unfortunately, we treat each character in the input as its own symbol
 	    thus a transition with a symbol longer than one character will never be used
@@ -392,18 +394,19 @@ impl NFA {
 	    performing a simple == comparison which will clearly fail when lengthes differ.
 	    I will be fixing this sooooooon!
 	     */
+
 	    if log {
-		println!("{:?} reading `{c}`", &automaton_states);
+		println!("{:?} reading `{next_symbol}`", &automaton_states);
 	    }
-	    if !self.alphabet.contains(&c.to_string()) {
+	    if !self.alphabet.contains(&next_symbol) {
 		if log {
-		    eprintln!("Warning: Symbol {c} is not in alphabet {:?}", self.alphabet);
+		    eprintln!("Warning: Symbol {next_symbol} is not in alphabet {:?}", self.alphabet);
 		}
 		break;
 	    }
 
 	    // Move according to the transition function.
-	    automaton_states = self.move_set(&automaton_states, &c.to_string());
+	    automaton_states = self.move_set(&automaton_states, next_symbol);
 
 	    if log {
 		println!("=> {:?}", automaton_states);
@@ -427,10 +430,21 @@ impl NFA {
 	}
 
 	if log {
-	    eprintln!("{:?}ed input `{input}`", result);
-	}
+	    eprintln!("{:?}ed input `{input}`\n", result);
 
-	result
+	    if result == ComputationResult::Accept {
+		eprintln!(
+		    "Reached accepting states:\n{:?}",
+		    automaton_states
+			.intersection(&self.accept_states)
+			.collect::<HashSet<_>>()
+		);
+	    }
+	}
+	eprintln!("########################################");
+	eprintln!();
+
+	Ok(result)
     }
 
     /*
@@ -464,7 +478,7 @@ impl NFA {
 	let mut dfa = NFA::new_empty_nfa(true);
 
 	let mut dfa_alphabet = self.alphabet.clone();
-	dfa_alphabet.remove("");
+	dfa_alphabet.remove(&'\0');
 
 	dfa.alphabet = dfa_alphabet.clone();
 
@@ -499,7 +513,7 @@ impl NFA {
 	    let destination =
 		dfa.write_state_symbols_map(&sink_state_set_name);
 	    for symbol in &dfa_alphabet {
-		destination.insert(String::from(symbol), HashSet::from( [ String::from(&sink_state_set_name) ] ));
+		destination.insert(*symbol, HashSet::from( [ String::from(&sink_state_set_name) ] ));
 	    }
 	}
 
@@ -524,7 +538,7 @@ impl NFA {
 		    state_symbols_map.is_empty();
 
 		for symbol in &dfa_alphabet {
-		    let moved_new_set = self.move_set(new_set, symbol);
+		    let moved_new_set = self.move_set(new_set, *symbol);
 		    let moved_new_set_name =
 			stringify_set(&moved_new_set);
 
@@ -533,7 +547,7 @@ impl NFA {
 		    }
 
 		    state_symbols_map
-			.entry( String::from(symbol) )
+			.entry( *symbol )
 			.or_insert(HashSet::new())
 			.insert({
 			    if moved_new_set.is_empty() {
@@ -775,20 +789,20 @@ impl NFA {
 	// which is essential when we have empty string transitions
 	self_star.is_deterministic = false;
 
-	self_star.alphabet.insert( String::new() ); // in case missing
+	self_star.alphabet.insert('\0'); // in case missing
 	self_star.states.insert( String::from(star_state) );
 	self_star.start_state = String::from(star_state); // set the new start state
 	self_star.accept_states.insert( String::from(star_state) ); // mark the new state as accepting
 
 	// Create an empty string transition from the new (start) state
 	// to the old start state
-	self_star.add_transition(star_state, "", vec![self.start_state.to_string()].iter());
+	self_star.add_transition(star_state, '\0', vec![self.start_state.to_string()].iter());
 
 	self.accept_states.iter().for_each(
 	    |state| {
 		// For each original accepting state (q),
 		// create an empty string transition from q to the old start state.
-		self_star.add_transition(state, "", vec![self.start_state.to_string()].iter());
+		self_star.add_transition(state, '\0', vec![self.start_state.to_string()].iter());
 	    }
 	);
 
@@ -827,13 +841,13 @@ impl NFA {
 	    // to the start state of currently processed automaton.
 	    union_nfa
 		.add_transition(
-		    union_nfa_start_state, "",
+		    union_nfa_start_state, '\0',
 		    vec![ style(automaton.start_state.as_str(), counter) ].iter()
 		);
 
 	    // Add the alphabet of the currently processed automaton
 	    automaton.alphabet.iter().for_each(|x| {
-		union_nfa.alphabet.insert(x.to_string());
+		union_nfa.alphabet.insert(*x);
 	    });
 
 	    /*
@@ -854,7 +868,7 @@ impl NFA {
 		 */
 		if let Some(state_map) = automaton.read_state_symbols_map(s) {
 		    let mut adjusted_state_map =
-			HashMap::<String, HashSet::<String>>::new();
+			HashMap::<char, HashSet::<String>>::new();
 
 		    for (symbol, symbol_set) in state_map {
 			let symbol_set =
@@ -864,7 +878,7 @@ impl NFA {
 				style(elem.as_str(), counter)
 			    })
 			    .collect::<HashSet::<String>>();
-			adjusted_state_map.insert(symbol.to_string(), symbol_set);
+			adjusted_state_map.insert(*symbol, symbol_set);
 		    }
 
 		    // Adjoin the (state symbols map) of currently processed state.
@@ -916,7 +930,7 @@ impl NFA {
 
 	    // Add the alphabet of the currently processed automaton
             automaton.alphabet.iter().for_each(|x| {
-                concat_nfa.alphabet.insert(String::from(x));
+                concat_nfa.alphabet.insert(*x);
             });
 
 	    /*
@@ -936,14 +950,15 @@ impl NFA {
 		since they all belong to the currently processed automaton.
 		 */
                 if let Some(state_map) = automaton.read_state_symbols_map(s) {
-                    let mut adjusted_state_map = HashMap::<String, HashSet<String>>::new();
+                    let mut adjusted_state_map =
+			HashMap::<char, HashSet<String>>::new();
 
                     for (symbol, symbol_set) in state_map {
                         let symbol_set = symbol_set
                             .iter()
                             .map(|elem| style(elem.as_str(), i))
                             .collect::<HashSet<String>>();
-                        adjusted_state_map.insert(symbol.to_string(), symbol_set);
+                        adjusted_state_map.insert(*symbol, symbol_set);
                     }
 
 		    // Adjoin the (state symbols map) of currently processed state.
@@ -963,7 +978,7 @@ impl NFA {
                     let name = style(accept_state, i);
                     concat_nfa.add_transition(
                         &name,
-                        "",
+                        '\0',
                         &mut [style(&next.start_state, i + 1)].iter(),
                     );
                 }
