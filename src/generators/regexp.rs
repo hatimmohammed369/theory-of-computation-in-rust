@@ -1,3 +1,5 @@
+mod compiler;
+
 use crate::automata::nfa::NFA;
 
 // Regular Expressions module.

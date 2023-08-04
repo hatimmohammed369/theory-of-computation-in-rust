@@ -203,7 +203,7 @@ impl NFA {
 	}
     }
 
-    fn new_empty_nfa(is_deterministic: bool) -> NFA {
+    pub fn new_empty_nfa(is_deterministic: bool) -> NFA {
 	// It will be useful somewhere.
 	NFA {
 	    states: HashSet::new(),
@@ -625,9 +625,9 @@ impl NFA {
 	    }
 	}
 
-	use crate::generators::regular_expressions::star_string_regex as star;
-	use crate::generators::regular_expressions::union_string_regexes as union;
-	use crate::generators::regular_expressions::concat_string_regexes as concat;
+	use crate::generators::regexp::star_string_regex as star;
+	use crate::generators::regexp::union_string_regexes as union;
+	use crate::generators::regexp::concat_string_regexes as concat;
 
 	let mut function =
 	    HashMap::<(&str, &str), RefCell<Option<String>>>::new();
