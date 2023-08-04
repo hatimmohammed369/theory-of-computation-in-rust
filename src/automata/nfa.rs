@@ -841,15 +841,21 @@ impl NFA {
     state S has empty string transition to each automaton in given the set
     and the accept states of the union automaton are exaclty those of the given automata
      */
-    pub fn union<'a>(automata: impl Iterator<Item = &'a NFA>, union_nfa_start_state: &str) -> NFA {
-	let mut union_nfa = NFA::new_empty_nfa(false);
+    pub fn union<'a>(automata: impl Iterator<Item = &'a NFA>, union_start_state: &str) -> NFA {
+	// The new start state for the union NFA
+	let start_state = String::from(union_start_state);
 
-	// Set the distinguished non-accepting start state for the union automaton.
-	union_nfa.start_state = union_nfa_start_state.to_string();
+	let mut states = HashSet::<String>::from( [String::from(&start_state)] );
+	let mut alphabet = HashSet::<char>::new();
+	let mut accept_states = HashSet::<String>::new();
+	let mut transition_function =
+	    HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
-	// add the new start state to the states sets of the union automaton.
-	union_nfa.states.insert(
-	    union_nfa_start_state.to_string()
+	transition_function.insert(
+	    String::from(&start_state),
+	    HashMap::from(
+		[('\0', HashSet::new())]
+	    )
 	);
 
 	/*
@@ -864,15 +870,16 @@ impl NFA {
 	for (counter, automaton) in automata.enumerate() {
 	    // Add an empty string transition from the new start state
 	    // to the start state of currently processed automaton.
-	    union_nfa
-		.add_transition(
-		    union_nfa_start_state, '\0',
-		    vec![ style(automaton.start_state.as_str(), counter) ].iter()
-		);
+	    transition_function
+		.get_mut(&start_state)
+		.unwrap()
+		.get_mut(&'\0')
+		.unwrap()
+		.insert(style(&automaton.start_state, counter));
 
 	    // Add the alphabet of the currently processed automaton
 	    automaton.alphabet.iter().for_each(|x| {
-		union_nfa.alphabet.insert(*x);
+		alphabet.insert(*x);
 	    });
 
 	    /*
@@ -884,7 +891,7 @@ impl NFA {
 		let name = style(s, counter);
 
 		// insert the styled name into the states set of the union automaton
-		union_nfa.states.insert(name.to_string());
+		states.insert( String::from(&name) );
 
 		/*
 		If this state in currently process automaton has some transitions
@@ -907,7 +914,7 @@ impl NFA {
 		    }
 
 		    // Adjoin the (state symbols map) of currently processed state.
-		    union_nfa.transition_function.insert(name, adjusted_state_map);
+		    transition_function.insert(String::from(&name), adjusted_state_map);
 		}
 	    });
 
@@ -919,11 +926,22 @@ impl NFA {
 	     */
 	    automaton.accept_states.iter().for_each(|s| {
 		let name = style(s, counter);
-		union_nfa.accept_states.insert(name);
+		accept_states.insert(name);
 	    });
 	}
 
-	union_nfa
+	let is_deterministic = false;
+	let dfa = RefCell::new( Rc::new(None) );
+
+	NFA {
+	    states,
+	    alphabet,
+	    transition_function,
+	    start_state,
+	    accept_states,
+	    is_deterministic,
+	    dfa
+	}
     }
 
     /*
