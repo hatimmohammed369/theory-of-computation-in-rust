@@ -776,6 +776,14 @@ impl NFA {
 	final_expression.to_string()
     }
 
+    /*
+    Compute the Kleene closure of this automaton
+    The Kleene closure of an NFA (N) is defined as follow:
+    Create a new distinguished start state S, mark S as accepting
+    State (S) has an empty string transition leading to the start state of (N)
+    For each accepting state in (N) add an empty string transition leading to
+    the start state of (N)
+     */
     pub fn kleene_star(&self, star_start_state: &str) -> NFA {
 	// The new start state, kleene starred NFA start state
 	let mut start_state = String::from(star_start_state);
@@ -836,7 +844,7 @@ impl NFA {
     Compute the union of a finite set of NFAs
     Their union is defined like follow:
     Create a distinguished non-accepting start state S for the union automaton
-    state S has empty string transition to each automaton in given the set
+    State S has a empty string transitions to each start state in each automaton in given the set
     and the accept states of the union automaton are exaclty those of the given automata
      */
     pub fn union<'a>(automata: impl Iterator<Item = &'a NFA>, union_start_state: &str) -> NFA {
@@ -995,7 +1003,8 @@ impl NFA {
 			HashMap::<char, HashSet<String>>::new();
 
                     for (symbol, symbol_set) in state_map {
-                        let symbol_set = symbol_set
+                        let symbol_set =
+			    symbol_set
                             .iter()
                             .map(|elem| style(elem.as_str(), counter))
                             .collect::<HashSet<String>>();
