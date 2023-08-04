@@ -4,7 +4,7 @@ use crate::automata::nfa::NFA;
 
 // Option::None REPRESENTS THE PHI REGULAR EXPRESSION, THE EMPTY LANGUAGE
 
-// Compute the kleen star of a regular expression
+// Compute the kleene star of a regular expression
 pub fn star_string_regex(automaton: &NFA, expr: &Option<&str>) -> String {
     if expr.is_none() {
 	/*
@@ -229,4 +229,16 @@ pub fn concat_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
     }
 
     Some(concat_expr)
+}
+
+enum TokenType {
+    EmptyString, Symbol,
+    RightParen, LeftParen,
+    Star, Pipe, End
+}
+
+struct Token {
+    pub name: TokenType,
+    pub lexeme: String,
+    pub position: usize
 }
