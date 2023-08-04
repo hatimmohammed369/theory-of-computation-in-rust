@@ -773,8 +773,6 @@ impl NFA {
 	let final_expression =
 	    final_expression.unwrap();
 
-
-
 	final_expression.to_string()
     }
 
@@ -847,6 +845,8 @@ impl NFA {
 
 	let mut states = HashSet::<String>::from( [String::from(&start_state)] );
 	let mut alphabet = HashSet::<char>::new();
+	alphabet.insert('\0');
+	
 	let mut accept_states = HashSet::<String>::new();
 	let mut transition_function =
 	    HashMap::<String, HashMap<char, HashSet<String>>>::new();
@@ -957,23 +957,21 @@ impl NFA {
     the i-th part of the input for all 1 <= i <= N.
      */
     pub fn concatenate(automata: &[&NFA]) -> NFA {
-        let style =
-	    |s: &str, k: usize| format!("(A{k}.{s})");
+        let style = |s: &str, k: usize| {
+	    format!("(A{k}.{s})")
+	};
 
-        let mut concat_nfa = NFA::new_empty_nfa(false);
+	let mut states = HashSet::<String>::new();
+	let mut alphabet = HashSet::<char>::new();
+	alphabet.insert('\0');
+	
+	let mut transition_function =
+	    HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
-	/*
-	The start state in the concatenation automaton is
-	the start state of the first automaton in the given NFAs sequence.
-	 */
-        concat_nfa.start_state = style(&automata[0].start_state, 0);
-
-        for i in 0..automata.len() {
-            let automaton = automata[i];
-
+	for (counter, automaton) in automata.iter().enumerate() {
 	    // Add the alphabet of the currently processed automaton
             automaton.alphabet.iter().for_each(|x| {
-                concat_nfa.alphabet.insert(*x);
+		alphabet.insert(*x);
             });
 
 	    /*
@@ -982,10 +980,10 @@ impl NFA {
 	     */
             automaton.states.iter().for_each(|s| {
 		// style state name
-                let name = style(s, i);
+                let name = style(s, counter);
 
 		// insert the styled name into the states set of the union automaton
-                concat_nfa.states.insert(String::from(&name));
+		states.insert(String::from(&name));
 
 		/*
 		If this state in currently process automaton has some transitions
@@ -999,45 +997,66 @@ impl NFA {
                     for (symbol, symbol_set) in state_map {
                         let symbol_set = symbol_set
                             .iter()
-                            .map(|elem| style(elem.as_str(), i))
+                            .map(|elem| style(elem.as_str(), counter))
                             .collect::<HashSet<String>>();
                         adjusted_state_map.insert(*symbol, symbol_set);
                     }
 
 		    // Adjoin the (state symbols map) of currently processed state.
-                    concat_nfa
-                        .transition_function
+                    transition_function
                         .insert(name, adjusted_state_map);
                 }
             });
 
-            if i + 1 < automata.len() {
+            if counter + 1 < automata.len() {
 		/*
-		Create an empty string transition from the accept states
+		Create empty string transitions from the accept states
 		of the current automaton to the start state of the next.
 		 */
-                let next = automata[i + 1];
+		let next_start_state =
+		    style(&automata[counter+1].start_state, counter+1);
+
                 for accept_state in &automaton.accept_states {
-                    let name = style(accept_state, i);
-                    concat_nfa.add_transition(
-                        &name,
-                        '\0',
-                        &mut [style(&next.start_state, i + 1)].iter(),
-                    );
+                    let name = style(accept_state, counter);
+		    let state_map =
+			transition_function
+			.get_mut(&name)
+			.unwrap();
+
+		    if let Some(epsilon_set) = state_map.get_mut(&'\0') {
+			epsilon_set.insert( String::from(&next_start_state) );
+		    } else {
+			state_map.insert(
+			    '\0',
+			    HashSet::from( [String::from(&next_start_state)] )
+			);
+		    }
                 }
             }
         }
 
-	/*
-	Mark the accept states of the last automaton
-	as the only accept states of the whole concatenation automata
-	 */
-        for accept_state in &automata.last().unwrap().accept_states {
-            concat_nfa
-                .accept_states
-                .insert(style(accept_state, automata.len() - 1));
-        }
-
-        concat_nfa
+	let start_state = style(&automata[0].start_state, 0);
+	let is_deterministic = false;
+	let dfa = RefCell::new( Rc::new(None) );
+	let accept_states =
+	    automata
+	    .last()
+	    .unwrap()
+	    .accept_states
+	    .iter()
+	    .map(|s| {
+		style(s, automata.len()-1)
+	    })
+	    .collect::<HashSet<String>>();
+	
+	NFA {
+	    states,
+	    alphabet,
+	    transition_function,
+	    start_state,
+	    accept_states,
+	    is_deterministic,
+	    dfa
+	}
     }
 }
