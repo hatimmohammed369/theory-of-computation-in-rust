@@ -778,35 +778,60 @@ impl NFA {
 	final_expression.to_string()
     }
 
-    pub fn star(&self, star_state: &str) -> NFA {
-	if self.states.contains(star_state) {
-	    panic!("The star state `{star_state}` is already present");
+    pub fn kleene_star(&self, star_start_state: &str) -> NFA {
+	// The new start state, kleene starred NFA start state
+	let mut start_state = String::from(star_start_state);
+
+	if self.states.contains(star_start_state) {
+	    start_state = format!("{:?}", &start_state as *const String);
 	}
 
-	let mut self_star = self.clone();
+	let mut states = self.states.clone();
+	states.insert( String::from(&start_state) );
 
-	// Leaving is_deterministic true will hold method (expand) from working
-	// which is essential when we have empty string transitions
-	self_star.is_deterministic = false;
+	let mut alphabet = self.alphabet.clone();
+	alphabet.insert('\0'); // if missing
 
-	self_star.alphabet.insert('\0'); // in case missing
-	self_star.states.insert( String::from(star_state) );
-	self_star.start_state = String::from(star_state); // set the new start state
-	self_star.accept_states.insert( String::from(star_state) ); // mark the new state as accepting
+	let mut transition_function =
+	    self.transition_function.clone();
 
-	// Create an empty string transition from the new (start) state
-	// to the old start state
-	self_star.add_transition(star_state, '\0', vec![self.start_state.to_string()].iter());
+	let mut accept_states = self.accept_states.clone();
+	accept_states.insert( String::from(&start_state) );
 
-	self.accept_states.iter().for_each(
-	    |state| {
-		// For each original accepting state (q),
-		// create an empty string transition from q to the old start state.
-		self_star.add_transition(state, '\0', vec![self.start_state.to_string()].iter());
+	for accept_state in &accept_states {
+	    /*
+	    Add an empty string transition from all the accepting states (this includes the new start state)
+	    to the old start state (start state of the invoking NFA object)
+	     */
+	    transition_function
+		.entry( String::from(accept_state) )
+		.or_insert(HashMap::new());
+
+	    let state_map =
+		transition_function.get_mut(accept_state).unwrap();
+
+	    if let Some(epsilon_set) = state_map.get_mut(&'\0') {
+		epsilon_set.insert( String::from(&self.start_state) );
+	    } else {
+		state_map.insert(
+		    '\0',
+		    HashSet::from( [String::from(&self.start_state)] )
+		);
 	    }
-	);
+	}
 
-	self_star
+	let is_deterministic = false;
+	let dfa = RefCell::new( Rc::new(None) );
+
+	NFA {
+	    states,
+	    alphabet,
+	    transition_function,
+	    start_state,
+	    accept_states,
+	    is_deterministic,
+	    dfa
+	}
     }
 
     /*
