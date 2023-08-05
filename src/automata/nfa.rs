@@ -203,7 +203,30 @@ impl NFA {
 	}
     }
 
-    pub fn new_empty_nfa(is_deterministic: bool) -> NFA {
+    /*
+    Directly fill private fields using pre-computed values.
+     */
+    pub fn raw_new(
+	states: HashSet<String>,
+	alphabet: HashSet<char>,
+	transition_function: HashMap<String,HashMap<char, HashSet<String>>>,
+	start_state: String,
+	accept_states: HashSet<String>,
+	is_deterministic: bool,
+	dfa: RefCell<Rc<Option<Box<NFA>>>>
+    ) -> NFA {
+	NFA {
+	    states,
+	    alphabet,
+	    transition_function,
+	    start_state,
+	    accept_states,
+	    is_deterministic,
+	    dfa
+	}
+    }
+
+    fn new_empty_nfa(is_deterministic: bool) -> NFA {
 	// It will be useful somewhere.
 	NFA {
 	    states: HashSet::new(),
