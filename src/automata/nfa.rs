@@ -807,24 +807,25 @@ impl NFA {
     For each accepting state in (N) add an empty string transition leading to
     the start state of (N)
      */
-    pub fn kleene_star(&self, star_start_state: &str) -> NFA {
+
+    pub fn kleene_star(nfa: &NFA, star_start_state: &str) -> NFA {
 	// The new start state, kleene starred NFA start state
 	let mut start_state = String::from(star_start_state);
 
-	if self.states.contains(star_start_state) {
+	if nfa.states.contains(star_start_state) {
 	    start_state = format!("{:?}", &start_state as *const String);
 	}
 
-	let mut states = self.states.clone();
+	let mut states = nfa.states.clone();
 	states.insert( String::from(&start_state) );
 
-	let mut alphabet = self.alphabet.clone();
+	let mut alphabet = nfa.alphabet.clone();
 	alphabet.insert('\0'); // if missing
 
 	let mut transition_function =
-	    self.transition_function.clone();
+	    nfa.transition_function.clone();
 
-	let mut accept_states = self.accept_states.clone();
+	let mut accept_states = nfa.accept_states.clone();
 	accept_states.insert( String::from(&start_state) );
 
 	for accept_state in &accept_states {
@@ -840,11 +841,11 @@ impl NFA {
 		transition_function.get_mut(accept_state).unwrap();
 
 	    if let Some(epsilon_set) = state_map.get_mut(&'\0') {
-		epsilon_set.insert( String::from(&self.start_state) );
+		epsilon_set.insert( String::from(&nfa.start_state) );
 	    } else {
 		state_map.insert(
 		    '\0',
-		    HashSet::from( [String::from(&self.start_state)] )
+		    HashSet::from( [String::from(&nfa.start_state)] )
 		);
 	    }
 	}
