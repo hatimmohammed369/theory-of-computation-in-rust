@@ -833,6 +833,8 @@ impl NFA {
 	    Add an empty string transition from all the accepting states (this includes the new start state)
 	    to the old start state (start state of the invoking NFA object)
 	     */
+
+	    // Create a state map for this accept state if it does have.
 	    transition_function
 		.entry( String::from(accept_state) )
 		.or_insert(HashMap::new());
@@ -875,11 +877,13 @@ impl NFA {
 	// The new start state for the union NFA
 	let start_state = String::from(union_start_state);
 
-	let mut states = HashSet::<String>::from( [String::from(&start_state)] );
-	let mut alphabet = HashSet::<char>::new();
-	alphabet.insert('\0');
+	let mut states =
+	    HashSet::<String>::from( [String::from(&start_state)] );
+	let mut alphabet =
+	    HashSet::<char>::from(['\0']);
 	
-	let mut accept_states = HashSet::<String>::new();
+	let mut accept_states =
+	    HashSet::<String>::new();
 	let mut transition_function =
 	    HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
@@ -939,7 +943,9 @@ impl NFA {
 			    symbol_set
 			    .iter()
 			    .map(|elem| {
-				style(elem.as_str(), counter)
+				let elem = style(elem.as_str(), counter);
+				states.insert(String::from(&elem));
+				elem
 			    })
 			    .collect::<HashSet::<String>>();
 			adjusted_state_map.insert(*symbol, symbol_set);
@@ -993,9 +999,10 @@ impl NFA {
 	    format!("(A{k}.{s})")
 	};
 
-	let mut states = HashSet::<String>::new();
-	let mut alphabet = HashSet::<char>::new();
-	alphabet.insert('\0');
+	let mut states =
+	    HashSet::<String>::new();
+	let mut alphabet =
+	    HashSet::<char>::from(['\0']);
 	
 	let mut transition_function =
 	    HashMap::<String, HashMap<char, HashSet<String>>>::new();
@@ -1030,7 +1037,11 @@ impl NFA {
                         let symbol_set =
 			    symbol_set
                             .iter()
-                            .map(|elem| style(elem.as_str(), counter))
+                            .map(|elem| {
+				let elem = style(elem.as_str(), counter);
+				states.insert(String::from(&elem));
+				elem
+			    })
                             .collect::<HashSet<String>>();
                         adjusted_state_map.insert(*symbol, symbol_set);
                     }
@@ -1053,8 +1064,8 @@ impl NFA {
                     let name = style(accept_state, counter);
 		    let state_map =
 			transition_function
-			.get_mut(&name)
-			.unwrap();
+			.entry(String::from(&name))
+			.or_insert(HashMap::new());
 
 		    if let Some(epsilon_set) = state_map.get_mut(&'\0') {
 			epsilon_set.insert( String::from(&next_start_state) );
