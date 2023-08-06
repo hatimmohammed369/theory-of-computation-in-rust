@@ -129,7 +129,7 @@ impl Iterator for Scanner {
     }
 }
 
-enum Expression<'a> {
+pub enum Expression<'a> {
     EmptyString {parent: Option<&'a Expression<'a>>,},
     Symbol {parent: Option<&'a Expression<'a>>, value: char},
     Grouping {parent: Option<&'a Expression<'a>>, inner_expr: Box<Expression<'a>>},
@@ -301,5 +301,231 @@ impl<'a> Expression<'a> {
 	    is_deterministic,
 	    dfa
 	)
+    }
+}
+
+pub struct Parser {
+    pub scanner: RefCell<Scanner>,
+    previous: RefCell<Option<Token>>,
+    current: RefCell<Option<Token>>
+}
+
+impl Parser {
+    pub fn new(scanner: Scanner) -> Parser {
+	let scanner = RefCell::new(scanner);
+	let previous = RefCell::new(None);
+	let current = RefCell::new(None);
+	Parser {
+	    scanner,
+	    previous,
+	    current
+	}
+    }
+
+    fn read_current(&self) -> Option<Token> {
+	self.current.borrow().clone()
+    }
+
+    fn read_previous(&self) -> Option<Token> {
+	self.previous.borrow().clone()
+    }
+
+    fn advance(&self) -> Option<Token> {
+	*self.previous.borrow_mut() = self.current.take();
+	*self.current.borrow_mut() = self.scanner.borrow_mut().next();
+	self.read_previous()
+    }
+
+    fn consume(
+	&self,
+	kind: TokenType,
+	message: &str
+    ) -> Result<Option<Token>, String> {
+	if self.check(kind) {
+	    Ok(self.advance())
+	} else {
+	    Err(String::from(message))
+	}
+    }
+
+    fn match_current(&self, expected: TokenType) -> bool {
+	if self.check(expected) {
+	    self.advance();
+	    true
+	} else {
+	    false
+	}
+    }
+
+    fn check(&self, expected: TokenType) -> bool {
+	match self.read_current() {
+	    Some(tok) => tok.name == expected,
+	    None => false
+	}
+    }
+    /*
+    Expression => Union
+    Union => Concat ( '|' Concat )? ( '|' Concat )*
+    Concat => Star Star*
+    Star => Primary ( '*' )?
+    Primary => SYMBOL | '(' Expression ')'
+     */
+    pub fn parse(&self) -> Result<Option<Expression>, String> {
+	let expr = self.expression();
+	if let Some(tok) = self.read_current() {
+	    if tok.lexeme == ')' {
+		return Err(String::from("Un-matched ')'"));
+	    }
+	}
+	expr
+    }
+
+    // Expression => union
+    fn expression(&self) -> Result<Option<Expression>, String> {
+	self.union()
+    }
+
+    // Union => Concat ( '|' Concat )? ( '|' Concat )*
+    fn union(&self) -> Result<Option<Expression>, String> {
+	let first = self.concat()?;
+	let first = first.unwrap();
+	let mut exprs = Vec::new();
+	exprs.push(first);
+
+	if self.match_current(TokenType::Pipe) {
+	    let second = self.concat()?;
+	    let second = second.unwrap();
+	    exprs.push(second);
+	}
+
+	while self.match_current(TokenType::Pipe) {
+	    let new_expr = self.concat()?;
+	    let new_expr = new_expr.unwrap();
+	    exprs.push(new_expr);
+	}
+
+	if exprs.len() <= 1 {
+	    return Ok(exprs.pop());
+	}
+
+	let union =
+	    Expression::Union {
+		parent: None,
+		items : exprs
+	    };
+
+	if let Expression::Union {items, ..} = &union {
+	    items
+		.iter()
+		.for_each(|item| {
+		    item.write_parent().replace(&union);
+		})
+	};
+
+	Ok(Some(union))
+    }
+
+    // Concat => Star Star*
+    fn concat(&self) -> Result<Option<Expression>, String> {
+	let mut exprs = Vec::new();
+	loop {
+	    let expr = self.star()?;
+	    match expr {
+		Some(value) => exprs.push(value),
+		None => break
+	    }
+	}
+
+	if exprs.len() == 0 {
+	    return Ok(None);
+	} else if exprs.len() == 1 {
+	    let parsed_expr = exprs.pop();
+	    return Ok(parsed_expr);
+	}
+
+	let concat =
+	    Expression::Concat {
+		parent: None,
+		items: exprs
+	    };
+
+	if let Expression::Concat {items, ..} = &concat {
+	    items
+		.iter()
+		.for_each(|item| {
+		    item.write_parent().replace(&concat);
+		})
+	};
+
+	Ok(Some(concat))
+    }
+
+    // Star => Primary ( '*' )?
+    fn star(&self) -> Result<Option<Expression>, String> {
+	let expr = self.primary()?;
+	let expr = expr.unwrap();
+
+	if self.match_current(TokenType::Star) {
+	    let star =
+		Expression::Star {
+		    parent: None,
+		    inner_expr: Box::new(expr)
+		};
+
+	    if let Expression::Star {inner_expr, ..} = &star {
+		inner_expr.write_parent().replace(&star);
+	    };
+
+	    return Ok(Some(star));
+	}
+
+	Ok(Some(expr))
+    }
+
+    // Primary => SYMBOL | '(' Expression ')'
+    fn primary(&self) -> Result<Option<Expression>, String> {
+	match self.read_current() {
+	    Some(peek) => {
+		if self.match_current(TokenType::LeftParen) {
+		    let expr = self.expression()?;
+		    self.consume(
+			TokenType::RightParen,
+			"Expected ')' after expression"
+		    )?;
+
+		    let expr = expr.unwrap();
+
+		    let grouping =
+			Expression::Grouping {
+			    parent: None,
+			    inner_expr: Box::new(expr)
+			};
+		    if let Expression::Grouping {inner_expr, ..} = &grouping {
+			inner_expr.write_parent().replace(&grouping);
+		    };
+		    return Ok(
+			Some(grouping)
+		    );
+		} else if
+		    self
+		    .scanner
+		    .borrow()
+		    .alphabet
+		    .contains(&peek.lexeme)
+		{
+		    self.advance();
+		    return Ok(
+			Some(
+			    Expression::Symbol {
+				parent: None,
+				value : self.read_previous().unwrap().lexeme
+			    }
+			)
+		    );
+		}
+		Ok(None)
+	    },
+	    None => Ok(None)
+	}
     }
 }
