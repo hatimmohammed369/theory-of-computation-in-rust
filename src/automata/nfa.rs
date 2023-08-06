@@ -403,9 +403,9 @@ impl NFA {
 	// expand the start state
 	automaton_states = self.expand(&automaton_states);
 
-	eprintln!();
-	eprintln!("########################################");
 	if log {
+	    eprintln!();
+	    eprintln!("########################################");
 	    println!("Computing on input `{input}` . . .\n");
 	}
 
@@ -463,9 +463,9 @@ impl NFA {
 			.collect::<HashSet<_>>()
 		);
 	    }
+	    eprintln!("########################################");
+	    eprintln!();
 	}
-	eprintln!("########################################");
-	eprintln!();
 
 	Ok(result)
     }
