@@ -16,7 +16,7 @@ pub struct Token {
 
 pub struct Scanner {
     chars: Vec<char>,
-    alphabet: HashSet<char>,
+    pub alphabet: HashSet<char>,
     empty_string_found: bool,
     current: usize,
 }
