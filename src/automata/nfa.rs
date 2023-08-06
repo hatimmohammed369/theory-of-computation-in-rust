@@ -834,22 +834,12 @@ impl NFA {
 	    to the old start state (start state of the invoking NFA object)
 	     */
 
-	    // Create a state map for this accept state if it does have.
 	    transition_function
 		.entry( String::from(accept_state) )
-		.or_insert(HashMap::new());
-
-	    let state_map =
-		transition_function.get_mut(accept_state).unwrap();
-
-	    if let Some(epsilon_set) = state_map.get_mut(&'\0') {
-		epsilon_set.insert( String::from(&nfa.start_state) );
-	    } else {
-		state_map.insert(
-		    '\0',
-		    HashSet::from( [String::from(&nfa.start_state)] )
-		);
-	    }
+		.or_insert(HashMap::<char, HashSet<String>>::new())
+		.entry('\0')
+		.or_insert(HashSet::<String>::new())
+		.insert(String::from(&nfa.start_state));
 	}
 
 	let is_deterministic = false;
@@ -914,9 +904,9 @@ impl NFA {
 		.insert(style(&automaton.start_state, counter));
 
 	    // Add the alphabet of the currently processed automaton
-	    automaton.alphabet.iter().for_each(|x| {
-		alphabet.insert(*x);
-	    });
+	    alphabet.extend(
+		automaton.alphabet.iter()
+	    );
 
 	    /*
 	    Add all states of the currenly processed automaton but with their names
@@ -943,7 +933,7 @@ impl NFA {
 			    symbol_set
 			    .iter()
 			    .map(|elem| {
-				let elem = style(elem.as_str(), counter);
+				let elem = style(elem, counter);
 				states.insert(String::from(&elem));
 				elem
 			    })
@@ -952,7 +942,7 @@ impl NFA {
 		    }
 
 		    // Adjoin the (state symbols map) of currently processed state.
-		    transition_function.insert(String::from(&name), adjusted_state_map);
+		    transition_function.insert(name, adjusted_state_map);
 		}
 	    });
 
@@ -962,10 +952,9 @@ impl NFA {
 	    because the union automaton accepts only if at least
 	    one of its components do.
 	     */
-	    automaton.accept_states.iter().for_each(|s| {
-		let name = style(s, counter);
-		accept_states.insert(name);
-	    });
+	    accept_states.extend(
+		automaton.accept_states.iter().map(|q| style(q, counter))
+	    );
 	}
 
 	let is_deterministic = false;
@@ -1009,9 +998,9 @@ impl NFA {
 
 	for (counter, automaton) in automata.iter().enumerate() {
 	    // Add the alphabet of the currently processed automaton
-            automaton.alphabet.iter().for_each(|x| {
-		alphabet.insert(*x);
-            });
+	    alphabet.extend(
+		automaton.alphabet.iter()
+	    );
 
 	    /*
 	    Add all states of the currenly processed automaton but with their names
@@ -1038,7 +1027,7 @@ impl NFA {
 			    symbol_set
                             .iter()
                             .map(|elem| {
-				let elem = style(elem.as_str(), counter);
+				let elem = style(elem, counter);
 				states.insert(String::from(&elem));
 				elem
 			    })
@@ -1047,8 +1036,7 @@ impl NFA {
                     }
 
 		    // Adjoin the (state symbols map) of currently processed state.
-                    transition_function
-                        .insert(name, adjusted_state_map);
+                    transition_function.insert(name, adjusted_state_map);
                 }
             });
 
@@ -1062,19 +1050,12 @@ impl NFA {
 
                 for accept_state in &automaton.accept_states {
                     let name = style(accept_state, counter);
-		    let state_map =
-			transition_function
-			.entry(String::from(&name))
-			.or_insert(HashMap::new());
-
-		    if let Some(epsilon_set) = state_map.get_mut(&'\0') {
-			epsilon_set.insert( String::from(&next_start_state) );
-		    } else {
-			state_map.insert(
-			    '\0',
-			    HashSet::from( [String::from(&next_start_state)] )
-			);
-		    }
+		    transition_function
+			.entry(String::from(name))
+			.or_insert(HashMap::<char, HashSet<String>>::new())
+			.entry('\0')
+			.or_insert(HashSet::<String>::new())
+			.insert(String::from(&next_start_state));
                 }
             }
         }

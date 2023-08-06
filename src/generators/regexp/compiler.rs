@@ -194,6 +194,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use crate::automata::nfa::NFA;
 
+static mut COUNTER: usize = 0usize;
+
 impl<'a> Expression<'a> {
     fn read_parent(&self) -> &Option<&'a Expression> {
 	match self {
@@ -222,17 +224,14 @@ impl<'a> Expression<'a> {
     }
 
     pub fn compile(&self, alphabet: &HashSet<char>) -> NFA {
-	let id = format!("{:?}", self as *const Expression<'a>);
+	let id = format!("{:?}", self as *const Expression);
 	let self_string = self.formatted();
 
-	let mut counter = 0usize;
-	let mut name_gen = || {
-	    let temp = counter;
-	    counter += 1;
-	    format!("({self_string}@{id}).{temp}")
+	let start_state = unsafe {
+	    let temp = COUNTER;
+	    COUNTER += 1;
+	    format!("(#{temp}<{self_string}>@{id}).<START>")
 	};
-
-	let start_state = name_gen();
 	let mut states = HashSet::new();
 	states.insert(String::from(&start_state));
 
@@ -242,11 +241,14 @@ impl<'a> Expression<'a> {
 
 	match self {
 	    Self::EmptyString { .. } => {
-		states.insert(String::from(&start_state));
 		accept_states.insert(String::from(&start_state));
 	    },
 	    Expression::Symbol { value, .. } => {
-		let accept_state = name_gen();
+		let accept_state = unsafe {
+		    let temp = COUNTER;
+		    COUNTER += 1;
+		    format!("(#{temp}<{self_string}>@{id}).<ACCEPT>")
+		};
 
 		transition_function
 		    .entry(String::from(&start_state))
