@@ -371,6 +371,7 @@ impl Parser {
     Primary => SYMBOL | '(' Expression ')'
      */
     pub fn parse(&self) -> Result<Option<Expression>, String> {
+	self.advance();
 	let expr = self.expression();
 	if let Some(tok) = self.read_current() {
 	    if tok.lexeme == ')' {
@@ -388,20 +389,25 @@ impl Parser {
     // Union => Concat ( '|' Concat )? ( '|' Concat )*
     fn union(&self) -> Result<Option<Expression>, String> {
 	let first = self.concat()?;
+	if first.is_none() {
+	    return Ok(None);
+	}
 	let first = first.unwrap();
 	let mut exprs = Vec::new();
 	exprs.push(first);
 
 	if self.match_current(TokenType::Pipe) {
 	    let second = self.concat()?;
-	    let second = second.unwrap();
-	    exprs.push(second);
+	    if let Some(expr) = second {
+		exprs.push(expr);
+	    }
 	}
 
 	while self.match_current(TokenType::Pipe) {
 	    let new_expr = self.concat()?;
-	    let new_expr = new_expr.unwrap();
-	    exprs.push(new_expr);
+	    if let Some(expr) = new_expr {
+		exprs.push(expr);
+	    }
 	}
 
 	if exprs.len() <= 1 {
@@ -463,6 +469,10 @@ impl Parser {
     // Star => Primary ( '*' )?
     fn star(&self) -> Result<Option<Expression>, String> {
 	let expr = self.primary()?;
+	if expr.is_none() {
+	    return Ok(None);
+	}
+	
 	let expr = expr.unwrap();
 
 	if self.match_current(TokenType::Star) {
@@ -503,9 +513,7 @@ impl Parser {
 		    if let Expression::Grouping {inner_expr, ..} = &grouping {
 			inner_expr.write_parent().replace(&grouping);
 		    };
-		    return Ok(
-			Some(grouping)
-		    );
+		    Ok(Some(grouping))
 		} else if
 		    self
 		    .scanner
@@ -514,16 +522,17 @@ impl Parser {
 		    .contains(&peek.lexeme)
 		{
 		    self.advance();
-		    return Ok(
+		    Ok(
 			Some(
 			    Expression::Symbol {
 				parent: None,
-				value : self.read_previous().unwrap().lexeme
+				value : peek.lexeme
 			    }
 			)
-		    );
+		    )
+		} else {
+		    Ok(None)
 		}
-		Ok(None)
 	    },
 	    None => Ok(None)
 	}

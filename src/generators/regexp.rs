@@ -1,5 +1,6 @@
 mod compiler;
 
+use crate::automata::ComputationResult;
 use crate::automata::nfa::NFA;
 
 // Regular Expressions module.
@@ -231,4 +232,33 @@ pub fn concat_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
     }
 
     Some(concat_expr)
+}
+
+use crate::generators::regexp::compiler::{Scanner, Parser};
+
+pub struct Regexp<'a> {
+    pattern: &'a str,
+    matcher: NFA
+}
+
+impl<'a> Regexp<'a> {
+    pub fn new(pattern: &'a str) -> Result<Regexp, String> {
+	let scanner = Scanner::new(pattern);
+	let parser = Parser::new(scanner);
+	let parsed_expression = parser.parse()?.unwrap();
+	let alphabet = &parser.scanner.borrow().alphabet;
+	let matcher = parsed_expression.compile(&alphabet);
+	Ok(Regexp {pattern, matcher})
+    }
+
+    pub fn read_pattern(&self) -> &str {
+	self.pattern
+    }
+
+    pub fn fullmatch(&self, input: &str) -> bool {
+	match self.matcher.compute(input, false) {
+	    Ok(result) => result == ComputationResult::Accept,
+	    Err(_) => false
+	}
+    }
 }
