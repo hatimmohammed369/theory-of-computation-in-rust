@@ -249,6 +249,7 @@ impl<'a> Expression<'a> {
 		    COUNTER += 1;
 		    format!("(#{temp}<{self_string}>@{id}).<ACCEPT>")
 		};
+		states.insert(String::from(&accept_state));
 
 		transition_function
 		    .entry(String::from(&start_state))

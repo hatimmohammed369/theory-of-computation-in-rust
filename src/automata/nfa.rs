@@ -422,10 +422,12 @@ impl NFA {
 		println!("{:?} reading `{next_symbol}`", &automaton_states);
 	    }
 	    if !self.alphabet.contains(&next_symbol) {
-		if log {
-		    eprintln!("Warning: Symbol {next_symbol} is not in alphabet {:?}", self.alphabet);
-		}
-		break;
+		return Err(
+		    format!(
+			"Warning: Symbol `{next_symbol}` is not in alphabet {:?}",
+			self.alphabet
+		    )
+		);
 	    }
 
 	    // Move according to the transition function.
@@ -433,12 +435,12 @@ impl NFA {
 
 	    if log {
 		println!("=> {:?}", automaton_states);
-		if automaton_states.is_empty() {
-		    eprintln!("Early aborting computation because automaton lost all state");
-		    break;
-		}
 	    }
-
+	    if automaton_states.is_empty() {
+		return Err(
+		    "Early aborting computation because automaton lost all state".to_string()
+		);
+	    }
 	}
 
 	let mut result = ComputationResult::Reject;
