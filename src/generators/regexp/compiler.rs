@@ -129,17 +129,17 @@ impl Iterator for Scanner {
     }
 }
 
-pub enum Expression<'a> {
-    EmptyString {parent: Option<&'a Expression<'a>>,},
-    Symbol {parent: Option<&'a Expression<'a>>, value: char},
-    Grouping {parent: Option<&'a Expression<'a>>, inner_expr: Box<Expression<'a>>},
-    Star {parent: Option<&'a Expression<'a>>, inner_expr: Box<Expression<'a>>},
-    Union {parent: Option<&'a Expression<'a>>, items: Vec<Expression<'a>>},
-    Concat {parent: Option<&'a Expression<'a>>, items: Vec<Expression<'a>>},
+pub enum Expression {
+    EmptyString,
+    Symbol {value: char},
+    Grouping {inner_expr: Box<Expression>},
+    Star {inner_expr: Box<Expression>},
+    Union {items: Vec<Expression>},
+    Concat {items: Vec<Expression>},
 }
 
-impl From<&Expression<'_>> for String {
-    fn from(value: &Expression<'_>) -> Self {
+impl From<&Expression> for String {
+    fn from(value: &Expression) -> Self {
 	match value {
 	    Expression::EmptyString { .. } => {
 		String::from("{\"\"}")
@@ -171,21 +171,9 @@ impl From<&Expression<'_>> for String {
     }
 }
 
-impl std::fmt::Display for Expression<'_> {
+impl std::fmt::Display for Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-	let parent = self.read_parent();
-	let self_string = String::from(self);
-	let display =
-	    match parent {
-		Some(expr) => {
-		    let expr = *expr;
-		    let expr = String::from(expr);
-		    format!("({expr} <- {self_string})")
-		},
-		None => self_string
-	    };
-
-        write!(f, "{}", display)
+        write!(f, "{}", String::from(self))
     }
 }
 
@@ -196,29 +184,7 @@ use crate::automata::nfa::NFA;
 
 static mut COUNTER: usize = 0usize;
 
-impl<'a> Expression<'a> {
-    fn read_parent(&self) -> &Option<&'a Expression> {
-	match self {
-	    Self::EmptyString { parent } => parent,
-	    Expression::Symbol { parent, .. } => parent,
-	    Self::Grouping { parent, .. } => parent,
-	    Expression::Star { parent, .. } => parent,
-	    Self::Union { parent, .. } => parent,
-	    Self::Concat { parent, .. } => parent
-	}
-    }
-
-    fn write_parent(&self) -> Option<&'a Expression> {
-	match self {
-	    Self::EmptyString {parent } => *parent,
-	    Expression::Symbol {parent, .. } => *parent,
-	    Self::Grouping {parent, .. } => *parent,
-	    Expression::Star {parent, .. } => *parent,
-	    Self::Union {parent, .. } => *parent,
-	    Self::Concat {parent, .. } => *parent
-	}
-    }
-
+impl Expression {
     fn formatted(&self) -> String {
 	format!("{}", self)
     }
@@ -419,17 +385,8 @@ impl Parser {
 
 	let union =
 	    Expression::Union {
-		parent: None,
 		items : exprs
 	    };
-
-	if let Expression::Union {items, ..} = &union {
-	    items
-		.iter()
-		.for_each(|item| {
-		    item.write_parent().replace(&union);
-		})
-	};
 
 	Ok(Some(union))
     }
@@ -454,17 +411,8 @@ impl Parser {
 
 	let concat =
 	    Expression::Concat {
-		parent: None,
 		items: exprs
 	    };
-
-	if let Expression::Concat {items, ..} = &concat {
-	    items
-		.iter()
-		.for_each(|item| {
-		    item.write_parent().replace(&concat);
-		})
-	};
 
 	Ok(Some(concat))
     }
@@ -481,13 +429,8 @@ impl Parser {
 	if self.match_current(TokenType::Star) {
 	    let star =
 		Expression::Star {
-		    parent: None,
 		    inner_expr: Box::new(expr)
 		};
-
-	    if let Expression::Star {inner_expr, ..} = &star {
-		inner_expr.write_parent().replace(&star);
-	    };
 
 	    return Ok(Some(star));
 	}
@@ -510,12 +453,9 @@ impl Parser {
 
 		    let grouping =
 			Expression::Grouping {
-			    parent: None,
 			    inner_expr: Box::new(expr)
 			};
-		    if let Expression::Grouping {inner_expr, ..} = &grouping {
-			inner_expr.write_parent().replace(&grouping);
-		    };
+
 		    Ok(Some(grouping))
 		} else if
 		    self
@@ -528,7 +468,6 @@ impl Parser {
 		    Ok(
 			Some(
 			    Expression::Symbol {
-				parent: None,
 				value : peek.lexeme
 			    }
 			)
