@@ -129,38 +129,38 @@ impl Iterator for Scanner {
     }
 }
 
-pub enum Expression {
+pub enum ExpressionBase {
     EmptyString,
     Symbol {value: char},
-    Grouping {inner_expr: Box<Expression>},
-    Star {inner_expr: Box<Expression>},
-    Union {items: Vec<Expression>},
-    Concat {items: Vec<Expression>},
+    Grouping {inner_expr: Box<ExpressionBase>},
+    Star {inner_expr: Box<ExpressionBase>},
+    Union {items: Vec<ExpressionBase>},
+    Concat {items: Vec<ExpressionBase>},
 }
 
-impl From<&Expression> for String {
-    fn from(value: &Expression) -> Self {
+impl From<&ExpressionBase> for String {
+    fn from(value: &ExpressionBase) -> Self {
 	match value {
-	    Expression::EmptyString { .. } => {
+	    ExpressionBase::EmptyString { .. } => {
 		String::from("{\"\"}")
 	    },
-	    Expression::Symbol { value, .. } => {
+	    ExpressionBase::Symbol { value, .. } => {
 		String::from(*value)
 	    },
-	    Expression::Grouping { inner_expr, .. } => {
+	    ExpressionBase::Grouping { inner_expr, .. } => {
 		String::from(inner_expr.as_ref())
 	    },
-	    Expression::Star { inner_expr, .. } => {
+	    ExpressionBase::Star { inner_expr, .. } => {
 		format!("({})*", String::from(inner_expr.as_ref()))
 	    },
-	    Expression::Union { items, .. } => {
+	    ExpressionBase::Union { items, .. } => {
 		items
 		    .iter()
 		    .map(String::from)
 		    .collect::<Vec<String>>()
 		    .join("|")
 	    },
-	    Expression::Concat { items, .. } => {
+	    ExpressionBase::Concat { items, .. } => {
 		items
 		    .iter()
 		    .fold(String::new(), |a, b| {
@@ -171,9 +171,9 @@ impl From<&Expression> for String {
     }
 }
 
-impl std::fmt::Display for Expression {
+impl std::fmt::Display for &ExpressionBase {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", String::from(self))
+        write!(f, "{}", String::from(*self))
     }
 }
 
@@ -184,13 +184,13 @@ use crate::automata::nfa::NFA;
 
 static mut COUNTER: usize = 0usize;
 
-impl Expression {
+impl ExpressionBase {
     fn formatted(&self) -> String {
 	format!("{}", self)
     }
 
     pub fn compile(&self, alphabet: &HashSet<char>) -> NFA {
-	let id = format!("{:?}", self as *const Expression);
+	let id = format!("{:?}", self as *const ExpressionBase);
 	let self_string = self.formatted();
 
 	let start_state = unsafe {
@@ -209,7 +209,7 @@ impl Expression {
 	    Self::EmptyString { .. } => {
 		accept_states.insert(String::from(&start_state));
 	    },
-	    Expression::Symbol { value, .. } => {
+	    ExpressionBase::Symbol { value, .. } => {
 		let accept_state = unsafe {
 		    let temp = COUNTER;
 		    COUNTER += 1;
@@ -229,7 +229,7 @@ impl Expression {
 	    Self::Grouping { inner_expr, .. } => {
 		return inner_expr.compile(alphabet);
 	    },
-	    Expression::Star { inner_expr, .. } => {
+	    ExpressionBase::Star { inner_expr, .. } => {
 		let expr_nfa = inner_expr.compile(alphabet);
 		return NFA::kleene_star(&expr_nfa, &start_state);
 	    },
@@ -339,7 +339,7 @@ impl Parser {
     Star => Primary ( '*' )?
     Primary => SYMBOL | '(' Expression ')'
      */
-    pub fn parse(&self) -> Result<Option<Expression>, String> {
+    pub fn parse(&self) -> Result<Option<ExpressionBase>, String> {
 	self.advance();
 	let expr = self.expression();
 	if let Some(tok) = self.read_current() {
@@ -350,13 +350,13 @@ impl Parser {
 	expr
     }
 
-    // Expression => union
-    fn expression(&self) -> Result<Option<Expression>, String> {
+    // ExpressionBase => union
+    fn expression(&self) -> Result<Option<ExpressionBase>, String> {
 	self.union()
     }
 
     // Union => Concat ( '|' Concat )? ( '|' Concat )*
-    fn union(&self) -> Result<Option<Expression>, String> {
+    fn union(&self) -> Result<Option<ExpressionBase>, String> {
 	let first = self.concat()?;
 	if first.is_none() {
 	    return Ok(None);
@@ -384,7 +384,7 @@ impl Parser {
 	}
 
 	let union =
-	    Expression::Union {
+	    ExpressionBase::Union {
 		items : exprs
 	    };
 
@@ -392,7 +392,7 @@ impl Parser {
     }
 
     // Concat => Star Star*
-    fn concat(&self) -> Result<Option<Expression>, String> {
+    fn concat(&self) -> Result<Option<ExpressionBase>, String> {
 	let mut exprs = Vec::new();
 	loop {
 	    let expr = self.star()?;
@@ -410,7 +410,7 @@ impl Parser {
 	}
 
 	let concat =
-	    Expression::Concat {
+	    ExpressionBase::Concat {
 		items: exprs
 	    };
 
@@ -418,7 +418,7 @@ impl Parser {
     }
 
     // Star => Primary ( '*' )?
-    fn star(&self) -> Result<Option<Expression>, String> {
+    fn star(&self) -> Result<Option<ExpressionBase>, String> {
 	let expr = self.primary()?;
 	if expr.is_none() {
 	    return Ok(None);
@@ -428,7 +428,7 @@ impl Parser {
 
 	if self.match_current(TokenType::Star) {
 	    let star =
-		Expression::Star {
+		ExpressionBase::Star {
 		    inner_expr: Box::new(expr)
 		};
 
@@ -438,8 +438,8 @@ impl Parser {
 	Ok(Some(expr))
     }
 
-    // Primary => SYMBOL | '(' Expression ')'
-    fn primary(&self) -> Result<Option<Expression>, String> {
+    // Primary => SYMBOL | '(' ExpressionBase ')'
+    fn primary(&self) -> Result<Option<ExpressionBase>, String> {
 	match self.read_current() {
 	    Some(peek) => {
 		if self.match_current(TokenType::LeftParen) {
@@ -452,7 +452,7 @@ impl Parser {
 		    let expr = expr.unwrap();
 
 		    let grouping =
-			Expression::Grouping {
+			ExpressionBase::Grouping {
 			    inner_expr: Box::new(expr)
 			};
 
@@ -467,7 +467,7 @@ impl Parser {
 		    self.advance();
 		    Ok(
 			Some(
-			    Expression::Symbol {
+			    ExpressionBase::Symbol {
 				value : peek.lexeme
 			    }
 			)
