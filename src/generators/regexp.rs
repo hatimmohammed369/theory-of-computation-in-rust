@@ -243,12 +243,7 @@ pub struct Regexp<'a> {
 
 impl<'a> Regexp<'a> {
     pub fn new(pattern: &'a str) -> Result<Regexp, String> {
-	let scanner = Scanner::new(pattern);
-	let parser = Parser::new(scanner);
-	let parsed_expression = parser.parse()?.unwrap();
-	let alphabet = &parser.scanner.borrow().alphabet;
-	let matcher = parsed_expression.compile(&alphabet);
-	Ok(Regexp {pattern, matcher})
+	Err(String::new())
     }
 
     pub fn read_pattern(&self) -> &str {

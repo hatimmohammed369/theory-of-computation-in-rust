@@ -1053,7 +1053,7 @@ impl NFA {
                 for accept_state in &automaton.accept_states {
                     let name = style(accept_state, counter);
 		    transition_function
-			.entry(String::from(name))
+			.entry(name)
 			.or_insert(HashMap::<char, HashSet<String>>::new())
 			.entry('\0')
 			.or_insert(HashSet::<String>::new())

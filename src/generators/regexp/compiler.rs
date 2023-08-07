@@ -129,13 +129,14 @@ impl Iterator for Scanner {
     }
 }
 
+#[derive(Debug)]
 pub enum ExpressionBase {
     EmptyString,
     Symbol {value: char},
-    Grouping {inner_expr: Box<ExpressionBase>},
-    Star {inner_expr: Box<ExpressionBase>},
-    Union {items: Vec<ExpressionBase>},
-    Concat {items: Vec<ExpressionBase>},
+    Grouping {inner_expr: Rc<ExpressionBase>},
+    Star {inner_expr: Rc<ExpressionBase>},
+    Union {items: Vec<Rc<ExpressionBase>>},
+    Concat {items: Vec<Rc<ExpressionBase>>},
 }
 
 impl From<&ExpressionBase> for String {
@@ -148,24 +149,46 @@ impl From<&ExpressionBase> for String {
 		String::from(*value)
 	    },
 	    ExpressionBase::Grouping { inner_expr, .. } => {
-		String::from(inner_expr.as_ref())
+		format!(
+		    "({})",
+		    String::from(inner_expr.as_ref())
+		)
 	    },
 	    ExpressionBase::Star { inner_expr, .. } => {
-		format!("({})*", String::from(inner_expr.as_ref()))
+		let inner_expr = inner_expr.as_ref();
+		match inner_expr {
+		    ExpressionBase::Symbol {value} => {
+			format!("{value}*")
+		    },
+		    _ => {
+			format!(
+			    "({})*",
+			    String::from(inner_expr)
+			)
+		    }
+		}
 	    },
 	    ExpressionBase::Union { items, .. } => {
 		items
 		    .iter()
-		    .map(String::from)
+		    .map(|item| {
+			String::from(item.as_ref())
+		    })
 		    .collect::<Vec<String>>()
 		    .join("|")
 	    },
 	    ExpressionBase::Concat { items, .. } => {
 		items
 		    .iter()
-		    .fold(String::new(), |a, b| {
-			format!("{}{}", a, String::from(b))
-		    })
+		    .fold(
+			String::new(),
+			|a, b| {
+			    format!(
+				"{}{}", a,
+				String::from(b.as_ref())
+			    )
+			}
+		    )
 	    }
 	}
     }
@@ -332,6 +355,7 @@ impl Parser {
 	    None => false
 	}
     }
+
     /*
     Expression => Union
     Union => Concat ( '|' Concat )? ( '|' Concat )*
@@ -339,144 +363,4 @@ impl Parser {
     Star => Primary ( '*' )?
     Primary => SYMBOL | '(' Expression ')'
      */
-    pub fn parse(&self) -> Result<Option<ExpressionBase>, String> {
-	self.advance();
-	let expr = self.expression();
-	if let Some(tok) = self.read_current() {
-	    if tok.lexeme == ')' {
-		return Err(String::from("Un-matched ')'"));
-	    }
-	}
-	expr
-    }
-
-    // ExpressionBase => union
-    fn expression(&self) -> Result<Option<ExpressionBase>, String> {
-	self.union()
-    }
-
-    // Union => Concat ( '|' Concat )? ( '|' Concat )*
-    fn union(&self) -> Result<Option<ExpressionBase>, String> {
-	let first = self.concat()?;
-	if first.is_none() {
-	    return Ok(None);
-	}
-	let first = first.unwrap();
-	let mut exprs = Vec::new();
-	exprs.push(first);
-
-	if self.match_current(TokenType::Pipe) {
-	    let second = self.concat()?;
-	    if let Some(expr) = second {
-		exprs.push(expr);
-	    }
-	}
-
-	while self.match_current(TokenType::Pipe) {
-	    let new_expr = self.concat()?;
-	    if let Some(expr) = new_expr {
-		exprs.push(expr);
-	    }
-	}
-
-	if exprs.len() <= 1 {
-	    return Ok(exprs.pop());
-	}
-
-	let union =
-	    ExpressionBase::Union {
-		items : exprs
-	    };
-
-	Ok(Some(union))
-    }
-
-    // Concat => Star Star*
-    fn concat(&self) -> Result<Option<ExpressionBase>, String> {
-	let mut exprs = Vec::new();
-	loop {
-	    let expr = self.star()?;
-	    match expr {
-		Some(value) => exprs.push(value),
-		None => break
-	    }
-	}
-
-	if exprs.len() == 0 {
-	    return Ok(None);
-	} else if exprs.len() == 1 {
-	    let parsed_expr = exprs.pop();
-	    return Ok(parsed_expr);
-	}
-
-	let concat =
-	    ExpressionBase::Concat {
-		items: exprs
-	    };
-
-	Ok(Some(concat))
-    }
-
-    // Star => Primary ( '*' )?
-    fn star(&self) -> Result<Option<ExpressionBase>, String> {
-	let expr = self.primary()?;
-	if expr.is_none() {
-	    return Ok(None);
-	}
-	
-	let expr = expr.unwrap();
-
-	if self.match_current(TokenType::Star) {
-	    let star =
-		ExpressionBase::Star {
-		    inner_expr: Box::new(expr)
-		};
-
-	    return Ok(Some(star));
-	}
-
-	Ok(Some(expr))
-    }
-
-    // Primary => SYMBOL | '(' ExpressionBase ')'
-    fn primary(&self) -> Result<Option<ExpressionBase>, String> {
-	match self.read_current() {
-	    Some(peek) => {
-		if self.match_current(TokenType::LeftParen) {
-		    let expr = self.expression()?;
-		    self.consume(
-			TokenType::RightParen,
-			"Expected ')' after expression"
-		    )?;
-
-		    let expr = expr.unwrap();
-
-		    let grouping =
-			ExpressionBase::Grouping {
-			    inner_expr: Box::new(expr)
-			};
-
-		    Ok(Some(grouping))
-		} else if
-		    self
-		    .scanner
-		    .borrow()
-		    .alphabet
-		    .contains(&peek.lexeme)
-		{
-		    self.advance();
-		    Ok(
-			Some(
-			    ExpressionBase::Symbol {
-				value : peek.lexeme
-			    }
-			)
-		    )
-		} else {
-		    Ok(None)
-		}
-	    },
-	    None => Ok(None)
-	}
-    }
 }
