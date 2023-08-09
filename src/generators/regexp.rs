@@ -241,9 +241,51 @@ pub struct Regexp<'a> {
     matcher: NFA
 }
 
+use std::rc::Rc;
+use crate::generators::regexp::compiler::Expression;
+
 impl<'a> Regexp<'a> {
     pub fn new(pattern: &'a str) -> Result<Regexp, String> {
-	Err(String::new())
+	let scanner = Scanner::new(pattern);
+	let parser = Parser::new(scanner);
+	let parsed_expression = parser.parse();
+	match parsed_expression {
+	    Ok(expr) => {
+		let mut stack = vec![Rc::clone(&expr)];
+		let mut level = 0;
+		while !stack.is_empty() {
+		    let top = stack.pop().unwrap();
+		    let top = top.as_ref();
+		    println!("Level {level}");
+		    println!("Expression: {}", String::from(top));
+		    println!("Full      : {top}");
+		    level += 1;
+		    println!("    Children: ");
+		    let children = &top.children;
+		    let children = children.borrow();
+		    let children: &Vec<Rc<Expression>> = children.as_ref();
+		    children
+			.iter()
+			.for_each(|child| {
+			    stack.push(Rc::clone(child));
+			    let child = child.as_ref();
+			    print!("    ");
+			    print!("    ");
+			    println!("Child: {}", String::from(child));
+			    print!("    ");
+			    print!("    ");
+			    println!("Full : {child}");
+			});
+		    println!();
+		    println!("########################################");
+		}
+
+		let matcher =
+		    expr.compile(&parser.scanner.borrow().alphabet);
+		Ok(Regexp {pattern, matcher})
+	    }
+	    Err(error) => Err(error)
+	}
     }
 
     pub fn read_pattern(&self) -> &str {

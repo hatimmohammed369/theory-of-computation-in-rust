@@ -296,6 +296,62 @@ impl ExpressionBase {
     }
 }
 
+use std::rc::Weak;
+
+#[derive(Debug)]
+pub struct Expression {
+    parent: RefCell<Option<Weak<Expression>>>,
+    base: RefCell<Option<Rc<ExpressionBase>>>,
+    pub children: RefCell<Vec<Rc<Expression>>>
+}
+
+impl From<&Expression> for String {
+    fn from(value: &Expression) -> Self {
+	let base = value.base.borrow();
+	let base = base.as_ref().unwrap();
+	let base = base.as_ref();
+	String::from(base)
+    }
+}
+
+impl Default for Expression {
+    fn default() -> Self {
+	Expression {
+	    parent: RefCell::new(None),
+	    base: RefCell::new(None),
+	    children: RefCell::new(Vec::new())
+	}
+    }
+}
+
+impl std::fmt::Display for &Expression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+	let base = self.base.borrow();
+	let base = base.as_ref().unwrap();
+	let base = base.as_ref();
+	let base = String::from(base);
+
+        match self.parent.borrow().as_ref() {
+	    Some(parent) => {
+		let parent = parent.upgrade().unwrap();
+		let parent = parent.base.borrow();
+		let parent = parent.as_ref().unwrap().as_ref();
+		let parent = String::from(parent);
+		write!(f, "({parent} <= {base})")
+	    }
+	    None => {
+		write!(f, "{base}")
+	    }
+	}
+    }
+}
+
+impl Expression {
+    pub fn compile(&self, alphabet: &HashSet<char>) -> NFA {
+	self.base.borrow().as_ref().unwrap().compile(alphabet)
+    }
+}
+
 pub struct Parser {
     pub scanner: RefCell<Scanner>,
     previous: RefCell<Option<Token>>,
@@ -318,23 +374,18 @@ impl Parser {
 	self.current.borrow().clone()
     }
 
-    fn read_previous(&self) -> Option<Token> {
-	self.previous.borrow().clone()
-    }
-
-    fn advance(&self) -> Option<Token> {
+    fn advance(&self) {
 	*self.previous.borrow_mut() = self.current.take();
 	*self.current.borrow_mut() = self.scanner.borrow_mut().next();
-	self.read_previous()
     }
 
     fn consume(
 	&self,
 	kind: TokenType,
 	message: &str
-    ) -> Result<Option<Token>, String> {
+    ) -> Result<(), String> {
 	if self.check(kind) {
-	    Ok(self.advance())
+	    Ok(())
 	} else {
 	    Err(String::from(message))
 	}
@@ -356,6 +407,39 @@ impl Parser {
 	}
     }
 
+    fn format_error(&self, error: (String, usize)) -> String {
+	let (msg, pos) = error;
+	let msg = format!("{msg}\n");
+
+	let mut pattern =
+	    self
+	    .scanner
+	    .borrow()
+	    .chars
+	    .iter()
+	    .fold(
+		String::new(),
+		|a, b| format!("{a}{b}")
+	    );
+	pattern.push('\n');
+
+	let mut indent = String::new(); // 4 spaces
+	indent.push(' ');
+	indent.push(' ');
+	indent.push(' ');
+	indent.push(' ');
+
+	let mut caret = String::new();
+	caret.push_str(&indent);
+	while caret.len() < pos+4 {caret.push(' ')}
+	caret.push('^');
+	caret.push('\n');
+
+	format!(
+	    "[Parsing Error at {pos}]: {msg}{indent}{pattern}{caret}"
+	)
+    }
+
     /*
     Expression => Union
     Union => Concat ( '|' Concat )? ( '|' Concat )*
@@ -363,4 +447,97 @@ impl Parser {
     Star => Primary ( '*' )?
     Primary => SYMBOL | '(' Expression ')'
      */
+    pub fn parse(&self) -> Result<Rc<Expression>, String> {
+	self.advance();
+	match self.expression() {
+	    Ok(expr) => Ok(expr),
+	    Err(error_info) => Err(self.format_error(error_info))
+	}
+    }
+
+    pub fn expression(&self) -> Result<Rc<Expression>, (String, usize)> {
+	self.primary()
+    }
+
+    pub fn primary(&self) -> Result<Rc<Expression>, (String, usize)> {
+	match self.read_current() {
+	    Some(peek) => {
+		if self.match_current(TokenType::LeftParen) {
+		    let parsed_expr = self.expression()?;
+		    if let Err(msg) =
+			self.consume(
+			    TokenType::RightParen,
+			    "Expected `)` after expression."
+			)
+		    {
+			return Err((msg, peek.position + 1));
+		    };
+		    let grouping =
+			ExpressionBase::Grouping {
+			    inner_expr:
+			    Rc::clone(
+				parsed_expr
+				    .base
+				    .borrow()
+				    .as_ref()
+				    .unwrap()
+			    )
+			};
+		    let grouping = Rc::new(grouping);
+
+		    let returned_expression = {
+			let parent =
+			    RefCell::new(None);
+			let base =
+			    RefCell::new(Some(grouping));
+			let children =
+			    RefCell::new(vec![]);
+
+			Expression {parent, base, children}
+		    };
+		    let returned_expression =
+			Rc::new(returned_expression);
+
+		    *parsed_expr.parent.borrow_mut() =
+			Some(Rc::downgrade(&returned_expression));
+
+		    returned_expression
+			.children
+			.borrow_mut()
+			.push(parsed_expr);
+
+		    Ok(returned_expression)
+
+		} else if
+		    self
+		    .scanner
+		    .borrow()
+		    .alphabet
+		    .contains(&peek.lexeme)
+		{
+		    // Single-symbol expression
+		    self.advance();
+		    let parent =
+			RefCell::new(None);
+		    let symbol =
+			ExpressionBase::Symbol {value: peek.lexeme};
+		    let symbol = Rc::new(symbol);
+		    let base =
+			RefCell::new(Some(symbol));
+		    let children =
+			RefCell::new(Vec::new());
+		    Ok(Rc::new(Expression {parent, base, children}))
+		} else {
+		    // Parsing Error: Un-expected character.
+		    let msg = String::from("Un-expected character");
+		    let pos = peek.position;
+		    Err((msg, pos))
+		}
+	    }
+	    None => {
+		// End of input
+		Ok(Rc::new(Expression::default()))
+	    }
+	}
+    }
 }
