@@ -381,13 +381,23 @@ impl Parser {
 
     fn consume(
 	&self,
-	kind: TokenType,
-	message: &str
-    ) -> Result<(), String> {
-	if self.check(kind) {
-	    Ok(())
-	} else {
-	    Err(String::from(message))
+	name: TokenType,
+	message: &str,
+	add_one_to_position: bool
+    ) -> Result<(), (String, usize)> {
+	let message = String::from(message);
+	match self.read_current() {
+	    Some(tok) => {
+		if tok.name != name {
+		    let position = tok.position +
+			if add_one_to_position {1} else {0};
+		    Err((message, position))
+		} else {
+		    self.advance();
+		    Ok(())
+		}
+	    },
+	    None => Err((message, &self.scanner.borrow().chars.len()-1))
 	}
     }
 
@@ -445,7 +455,7 @@ impl Parser {
     Union => Concat ( '|' Concat )? ( '|' Concat )*
     Concat => Star Star*
     Star => Primary ( '*' )?
-    Primary => SYMBOL | '(' Expression ')'
+    Primary => EMPTY_STRING | SYMBOL | '(' Expression ')'
      */
     pub fn parse(&self) -> Result<Rc<Expression>, String> {
 	self.advance();
@@ -456,22 +466,64 @@ impl Parser {
     }
 
     pub fn expression(&self) -> Result<Rc<Expression>, (String, usize)> {
-	self.primary()
+	self.star()
+    }
+
+    pub fn star(&self) -> Result<Rc<Expression>, (String, usize)> {
+	let primary = self.primary()?;
+	if self.match_current(TokenType::Star) {
+	    let star =
+		ExpressionBase::Star {
+		    inner_expr:
+		    Rc::clone(
+			primary
+			    .base
+			    .borrow()
+			    .as_ref()
+			    .unwrap()
+		    )
+		};
+	    let star = Rc::new(star);
+
+	    let returned_expression = {
+		let parent =
+		    RefCell::new(None);
+		let base =
+		    RefCell::new(Some(star));
+		let children =
+		    RefCell::new(vec![]);
+
+		Expression {parent, base, children}
+	    };
+	    let returned_expression =
+		Rc::new(returned_expression);
+
+	    *primary.parent.borrow_mut() =
+		Some(Rc::downgrade(&returned_expression));
+
+	    returned_expression
+		.children
+		.borrow_mut()
+		.push(primary);
+
+	    Ok(returned_expression)
+	} else {
+	    Ok(primary)
+	}
     }
 
     pub fn primary(&self) -> Result<Rc<Expression>, (String, usize)> {
 	match self.read_current() {
 	    Some(peek) => {
-		if self.match_current(TokenType::LeftParen) {
+		if peek.name == TokenType::LeftParen {
+		    self.advance();
 		    let parsed_expr = self.expression()?;
-		    if let Err(msg) =
-			self.consume(
-			    TokenType::RightParen,
-			    "Expected `)` after expression."
-			)
-		    {
-			return Err((msg, peek.position + 1));
-		    };
+		    self.consume(
+			TokenType::RightParen,
+			"Expected `)` after expression.",
+			true
+		    )?;
+
 		    let grouping =
 			ExpressionBase::Grouping {
 			    inner_expr:
@@ -507,14 +559,7 @@ impl Parser {
 			.push(parsed_expr);
 
 		    Ok(returned_expression)
-
-		} else if
-		    self
-		    .scanner
-		    .borrow()
-		    .alphabet
-		    .contains(&peek.lexeme)
-		{
+		} else if peek.name == TokenType::Symbol {
 		    // Single-symbol expression
 		    self.advance();
 		    let parent =
@@ -527,7 +572,7 @@ impl Parser {
 		    let children =
 			RefCell::new(Vec::new());
 		    Ok(Rc::new(Expression {parent, base, children}))
-		} else if self.match_current(TokenType::EmptyString) {
+		} else if peek.name == TokenType::EmptyString {
 		    // Empty string expression
 		    // Something like (), (|), ()|(), ...
 		    self.advance();
