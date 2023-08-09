@@ -722,7 +722,6 @@ impl NFA {
 		.unwrap_or(&phi);
 	    let leaving_self_loop =
 		star(
-		    self,
 		    &leaving_self_loop.borrow().as_deref()
 		);
 	    let leaving_self_loop =

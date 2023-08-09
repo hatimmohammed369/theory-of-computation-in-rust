@@ -5,10 +5,61 @@ use crate::automata::nfa::NFA;
 
 // Regular Expressions module.
 
+/*
+Add parenthesis to (expr) when needed, that's when:
+1 - (expr) is in form A|B|C|...
+2 - in (expr) first occurence of ( does not matche last )
+ */
+pub fn parenthesize(expr: &mut String) -> &mut String {
+    if expr.len() == 1 &&
+	(
+	    expr == "|" ||
+		expr == "\\" ||
+		expr == "(" ||
+		expr == ")" ||
+		expr == "*" ||
+		expr == "[" ||
+		expr == "]" ||
+		expr == "."
+	)
+    {
+	/*
+	Treat those characters specially such that return value
+	can be use as input to (regexp) module.
+	 */
+	expr.insert(0, '\\');
+	return expr;
+    }
+
+    let mut stars = 0u32;
+    while expr.ends_with('*') {
+	expr.pop();
+	stars += 1;
+    }
+
+    let mut nesting = 0u128;
+    for (idx, ch) in expr.char_indices() {
+	if ch == '(' {nesting += 1}
+	else if ch == ')' {nesting -= 1}
+
+	if nesting == 0 && (idx != expr.len() - 1 || ch == '|') {
+	    if stars > 0 {
+		for _ in 1..=stars {expr.push('*')}
+		stars = 0;
+	    }
+	    expr.insert(0, '(');
+	    expr.push(')');
+	    break;
+	}
+    }
+    if stars > 0 {for _ in 1..=stars {expr.push('*')}}
+    expr
+}
+
 // Option::None REPRESENTS THE PHI REGULAR EXPRESSION, THE EMPTY LANGUAGE
 
 // Compute the kleene star of a regular expression
-pub fn star_string_regex(automaton: &NFA, expr: &Option<&str>) -> String {
+pub fn star_string_regex(expr: &Option<&str>) -> String {
     if expr.is_none() {
 	/*
 	Starring the empty language yields the empty string
@@ -18,69 +69,7 @@ pub fn star_string_regex(automaton: &NFA, expr: &Option<&str>) -> String {
     }
 
     let mut expr = expr.unwrap().to_string();
-    if expr.is_empty() {
-	// Starring the empty string yields the empty string.
-	return String::new();
-    }
-
-    if automaton.read_alphabet().contains(&expr.chars().next().unwrap()) {
-	/*
-	If this regular expression is just an alphabet symbol
-	just append the `*`.
-	*/
-	expr.push('*');
-    } else if expr.starts_with('(') && expr.ends_with(')') {
-	/*
-	If the regular expressions starts and ends with `(` and `)`
-	then we must check if the `(` matches the `)`
-	if so we just append the star operator `*`
-
-	Otherwise we must surround the orginal regular expression
-	with parentheses to perserve the precedence of its parts
-	and then append the star operator `*`
-	 */
-
-	let mut nesting = 0;
-	for (idx, ch) in expr.char_indices() {
-	    if ch == '(' {nesting += 1;}
-	    else if ch == ')' {nesting -= 1;}
-
-	    if nesting == 0 && idx != expr.len()-1 {
-		/*
-		We reached the most outer level before the end of the expression
-		thus first `(` is closed before the end and hence it does not
-		match last `)` at the end of the expression
-		Hence we must surround the orginal expression with parentheses
-		*/
-		nesting = -1;
-		break;
-	    }
-	}
-
-	if nesting == -1 {
-	    /*
-	    First `(` does NOT match last `)`
-	    Surround the orginal expression with parentheses to
-	    perserve the precedence of its parts
-	    */
-	    expr = format!("({expr})*");
-	} else {
-	    /*
-	    First `(` DOES match last `)`
-	    Just append the star operator `*`
-	    */
-	    expr.push('*');
-	}
-    } else {
-	/*
-	This expression is neither an alphabet symbol
-	nor its starts and ends with parentheses
-	It must be parenthesised to perserve the precedence of its inner parts
-	then appending the star operator `*`
-	*/
-	expr = format!("({expr})*");
-    }
-
+    parenthesize(&mut expr);
     expr
 }
 
@@ -132,24 +121,8 @@ pub fn union_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
 	    continue;
 	}
 
-	let mut nesting = 0;
-	for ch in expr.chars() {
-	    if ch == '(' {nesting += 1;}
-	    else if ch == ')' {nesting -= 1;}
-
-	    if nesting == 0 && ch == '|' {
-		/*
-		We reached the outer most level in this particular expression received from the input
-		and this expression is union expression (A|B|C|...)
-		thus we must parenthesize it to perserve its precendence
-		*/
-		expr = format!("({expr})");
-		break;
-	    }
-	}
-
-	// Append the union operator `|`
-	expr = format!("{expr}|");
+	parenthesize(&mut expr);
+	expr.push('|');
 
 	union_expr.push_str(&expr);
     }
@@ -160,14 +133,14 @@ pub fn union_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
     } else if all_empty {
 	// All expressions are empty, just return the empty string
 	return Some(String::new());
-    }else if !union_expr.is_empty() {
-    	    /*
-    	    In each iteration of the above loop, we append the expression followed by `|`
-    	    thus the last expression will append a redundant `|` which must be removed
-    	    otherwise this redundant `|` will imply this expression unions the empty string
-    	    */
-    	    union_expr.pop();
-    	}
+    } else if !union_expr.is_empty() {
+    	/*
+    	In each iteration of the above loop, we append the expression followed by `|`
+    	thus the last expression will append a redundant `|` which must be removed
+    	otherwise this redundant `|` will imply this expression unions the empty string
+    	 */
+    	union_expr.pop();
+    }
 
     Some(union_expr)
 }
@@ -204,22 +177,7 @@ pub fn concat_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
 	// Now we know at one expression is not the empty string.
 	all_empty = false;
 
-	let mut nesting = 0;
-	for ch in expr.chars() {
-	    if ch == '(' {nesting += 1;}
-	    else if ch == ')' {nesting -= 1;}
-
-	    if nesting == 0 && ch == '|' {
-		/*
-		We reached the outer most level in this particular expression received from the input
-		and this expression is union expression (A|B|C|...)
-		thus we must parenthesize it to perserve its precendence
-		*/
-		expr = format!("({expr})");
-		break;
-	    }
-	}
-
+	parenthesize(&mut expr);
 	concat_expr.push_str(&expr);
     }
 

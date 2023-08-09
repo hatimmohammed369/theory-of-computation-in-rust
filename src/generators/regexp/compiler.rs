@@ -142,13 +142,14 @@ pub enum ExpressionBase {
 impl From<&ExpressionBase> for String {
     fn from(value: &ExpressionBase) -> Self {
 	match value {
-	    ExpressionBase::EmptyString { .. } => {
-		String::from("{\"\"}")
+	    ExpressionBase::EmptyString => {
+		String::new()
 	    },
 	    ExpressionBase::Symbol { value, .. } => {
 		String::from(*value)
 	    },
-	    ExpressionBase::Grouping { inner_expr, .. } => {
+	    ExpressionBase::Grouping
+	    { inner_expr, .. } => {
 		format!(
 		    "({})",
 		    String::from(inner_expr.as_ref())
