@@ -527,6 +527,20 @@ impl Parser {
 		    let children =
 			RefCell::new(Vec::new());
 		    Ok(Rc::new(Expression {parent, base, children}))
+		} else if self.match_current(TokenType::EmptyString) {
+		    // Empty string expression
+		    // Something like (), (|), ()|(), ...
+		    self.advance();
+		    let parent =
+			RefCell::new(None);
+		    let symbol =
+			ExpressionBase::EmptyString;
+		    let symbol = Rc::new(symbol);
+		    let base =
+			RefCell::new(Some(symbol));
+		    let children =
+			RefCell::new(Vec::new());
+		    Ok(Rc::new(Expression {parent, base, children}))
 		} else {
 		    // Parsing Error: Un-expected character.
 		    let msg = String::from("Un-expected character");
