@@ -200,7 +200,44 @@ pub struct Regexp<'a> {
 }
 
 use std::rc::Rc;
+use std::collections::LinkedList;
 use crate::generators::regexp::compiler::Expression;
+
+fn debug_expression(root: &Rc<Expression>) {
+    let mut expressions = LinkedList::from([Rc::clone(root)]);
+    let mut pending_counters = LinkedList::from([1usize]);
+    let mut level = 0u32;
+    while !pending_counters.is_empty() {
+	println!("++++++++++++++++++++++++++++++++++++++++");
+	println!("Level {level}");
+	let counter = pending_counters.pop_front().unwrap();
+	let mut new_children = 0usize;
+	for _ in 1..=counter {
+	    let left_most_expr = expressions.pop_front().unwrap();
+	    let left_most_expr = left_most_expr.as_ref();
+	    println!("Expression : {}", String::from(left_most_expr));
+	    println!("Full form : {left_most_expr}");
+	    expressions.extend(
+		{
+		    let children = left_most_expr.children.borrow();
+		    let children: &Vec<Rc<Expression>> = children.as_ref();
+		    new_children += children.len();
+		    let children =
+			children
+			.iter()
+			.map(|rc| Rc::clone(rc))
+			.collect::<Vec<Rc<Expression>>>();
+		    children.into_iter()
+		}
+	    );
+	}
+	if new_children > 0 {
+	    pending_counters.push_back(new_children);
+	}
+	level += 1;
+	println!("++++++++++++++++++++++++++++++++++++++++");
+    }
+}
 
 impl<'a> Regexp<'a> {
     pub fn new(pattern: &'a str) -> Result<Regexp, String> {
@@ -209,40 +246,16 @@ impl<'a> Regexp<'a> {
 	let parsed_expression = parser.parse();
 	match parsed_expression {
 	    Ok(expr) => {
-		let mut stack = vec![Rc::clone(&expr)];
-		let mut level = 0;
-		while !stack.is_empty() {
-		    let top = stack.pop().unwrap();
-		    let top = top.as_ref();
-		    println!("Level {level}");
-		    println!("Expression: {}", String::from(top));
-		    println!("Full      : {top}");
-		    level += 1;
-		    println!("    Children: ");
-		    let children = &top.children;
-		    let children = children.borrow();
-		    let children: &Vec<Rc<Expression>> = children.as_ref();
-		    children
-			.iter()
-			.for_each(|child| {
-			    stack.push(Rc::clone(child));
-			    let child = child.as_ref();
-			    print!("    ");
-			    print!("    ");
-			    println!("Child: {}", String::from(child));
-			    print!("    ");
-			    print!("    ");
-			    println!("Full : {child}");
-			});
-		    println!();
-		    println!("########################################");
-		}
+		debug_expression(&expr);
 
 		let matcher =
 		    expr.compile(&parser.scanner.borrow().alphabet);
 		Ok(Regexp {pattern, matcher})
 	    }
-	    Err(error) => Err(error)
+	    Err(error) => {
+		eprintln!("{error}");
+		Err(error)
+	    }
 	}
     }
 
