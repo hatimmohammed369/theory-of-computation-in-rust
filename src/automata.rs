@@ -13,6 +13,6 @@ Reject: the automaton rejected its input
 */
 #[derive(Debug, PartialEq)]
 pub enum ComputationResult {
-    Accept, Reject
+    Accept,
+    Reject,
 }
-
