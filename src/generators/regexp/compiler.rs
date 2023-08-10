@@ -453,7 +453,7 @@ impl Parser {
 
     // Expression => Union
     pub fn expression(&self) -> Result<Rc<Expression>, RegexpParseError> {
-        let parsed_expression = self.union();
+        let parsed_expression = self.union()?;
         if let Some(tok) = self.read_current() {
             if self.groupings.borrow().is_empty() // No active group
 		&& tok.name == TokenType::RightParen
@@ -468,23 +468,19 @@ impl Parser {
                 });
             }
         }
-        parsed_expression
+        Ok(parsed_expression)
     }
 
     // Union => Concat ( '|' Concat )? ( '|' Concat )*
     pub fn union(&self) -> Result<Rc<Expression>, RegexpParseError> {
         let mut concats = Vec::<Rc<Expression>>::new();
         loop {
-            match self.concat() {
-                Ok(rc_expr) => {
-                    if rc_expr.base.borrow().is_some() {
-                        concats.push(Rc::clone(&rc_expr));
-                    } else {
-                        // Can't parse another expression.
-                        break;
-                    }
-                }
-                Err(error_info) => return Err(error_info),
+            let concat_expr = self.concat()?;
+            if concat_expr.base.borrow().is_some() {
+                concats.push(Rc::clone(&concat_expr));
+            } else {
+                // Can't parse another expression, stop
+                break;
             }
 
             if !self.match_current(TokenType::Pipe) {
@@ -535,15 +531,12 @@ impl Parser {
     pub fn concat(&self) -> Result<Rc<Expression>, RegexpParseError> {
         let mut stars = Vec::<Rc<Expression>>::new();
         loop {
-            match self.star() {
-                Ok(rc_expr) => {
-                    if rc_expr.base.borrow().is_some() {
-                        stars.push(Rc::clone(&rc_expr));
-                    } else {
-                        break;
-                    }
-                }
-                Err(error_info) => return Err(error_info),
+            let star_expr = self.star()?;
+            if star_expr.base.borrow().is_some() {
+                stars.push(Rc::clone(&star_expr));
+            } else {
+                // Could not parse another expression, stop
+                break;
             }
         }
 
@@ -591,7 +584,10 @@ impl Parser {
         let primary = self.primary()?;
         if self.match_current(TokenType::Star) {
             if primary.base.borrow().is_none() {
-                // Could not parse an expression, error
+                /*
+                Could not parse an expression
+                Error: Using `*` preceeded by nothing
+                 */
                 let message = String::from("Expected expression before `*`");
                 let position = self.read_previous().unwrap().position;
                 let post_message = String::from("Use \\* to match a literal `*`");
