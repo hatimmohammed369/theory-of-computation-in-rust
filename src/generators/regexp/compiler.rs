@@ -467,7 +467,73 @@ impl Parser {
     }
 
     pub fn expression(&self) -> Result<Rc<Expression>, (String, usize)> {
-	self.concat()
+	self.union()
+    }
+
+    pub fn union(&self) -> Result<Rc<Expression>, (String, usize)> {
+	let mut concats = Vec::<Rc<Expression>>::new();
+	loop {
+	    match self.concat() {
+		Ok(rc_expr) => {
+		    if rc_expr.base.borrow().is_some() {
+			concats.push(Rc::clone(&rc_expr));
+		    } else {
+			// Can't parse another expression.
+			break;
+		    }
+		}
+		Err(error_info) => return Err(error_info)
+	    }
+
+	    if !self.match_current(TokenType::Pipe) {
+		break;
+	    }
+	}
+
+	if concats.len() <= 1 {
+	    Ok(concats.pop().unwrap())
+	} else {
+	    let union =
+		ExpressionBase::Union {
+		    items: concats
+			.iter()
+			.map(|expr| {
+			    Rc::clone(
+				expr
+				    .base
+				    .borrow()
+				    .as_ref()
+				    .unwrap()
+			    )
+			})
+			.collect::<_>()
+		};
+	    let union = Rc::new(union);
+
+	    let returned_expression = {
+		let parent =
+		    RefCell::new(None);
+		let base =
+		    RefCell::new(Some(union));
+		let children =
+		    RefCell::new(vec![]);
+
+		Expression {parent, base, children}
+	    };
+	    let returned_expression =
+		Rc::new(returned_expression);
+
+	    concats.iter().for_each(|concat_expr| {
+		*concat_expr.parent.borrow_mut() =
+		    Some(Rc::downgrade(&returned_expression));
+		returned_expression
+		    .children
+		    .borrow_mut()
+		    .push(Rc::clone(concat_expr));
+	    });
+
+	    Ok(returned_expression)
+	}
     }
 
     pub fn concat(&self) -> Result<Rc<Expression>, (String, usize)> {
@@ -518,16 +584,14 @@ impl Parser {
 	    let returned_expression =
 		Rc::new(returned_expression);
 
-	    stars
-		.iter()
-		.for_each(|star_expr| {
-		    *star_expr.parent.borrow_mut() =
-			Some(Rc::downgrade(&returned_expression));
-		    returned_expression
-			.children
-			.borrow_mut()
-			.push(Rc::clone(star_expr));
-		});
+	    stars.iter().for_each(|star_expr| {
+		*star_expr.parent.borrow_mut() =
+		    Some(Rc::downgrade(&returned_expression));
+		returned_expression
+		    .children
+		    .borrow_mut()
+		    .push(Rc::clone(star_expr));
+	    });
 
 	    Ok(returned_expression)
 	}
