@@ -467,7 +467,70 @@ impl Parser {
     }
 
     pub fn expression(&self) -> Result<Rc<Expression>, (String, usize)> {
-	self.star()
+	self.concat()
+    }
+
+    pub fn concat(&self) -> Result<Rc<Expression>, (String, usize)> {
+	let mut stars = Vec::<Rc<Expression>>::new();
+	loop {
+	    match self.star() {
+		Ok(rc_expr) => {
+		    if rc_expr.base.borrow().is_some() {
+			stars.push(Rc::clone(&rc_expr));
+		    } else {
+			break;
+		    }
+		}
+		Err(error_info) => return Err(error_info)
+	    }
+	}
+
+	if stars.len() <= 1 {
+	    Ok(stars.pop().unwrap())
+	} else {
+	    let concat =
+		ExpressionBase::Concat {
+		    items: stars
+			.iter()
+			.map(|expr| {
+			    Rc::clone(
+				expr
+				    .base
+				    .borrow()
+				    .as_ref()
+				    .unwrap()
+			    )
+			})
+			.collect::<_>()
+		};
+	    let concat = Rc::new(concat);
+
+	    let returned_expression = {
+		let parent =
+		    RefCell::new(None);
+		let base =
+		    RefCell::new(Some(concat));
+		let children =
+		    RefCell::new(vec![]);
+
+		Expression {parent, base, children}
+	    };
+	    let returned_expression =
+		Rc::new(returned_expression);
+
+	    stars
+		.iter()
+		.for_each(|star_expr| {
+		    *star_expr.parent.borrow_mut() =
+			Some(Rc::downgrade(&returned_expression));
+		    returned_expression
+			.children
+			.borrow_mut()
+			.push(Rc::clone(star_expr));
+		});
+
+	    Ok(returned_expression)
+	}
     }
 
     pub fn star(&self) -> Result<Rc<Expression>, (String, usize)> {
@@ -588,10 +651,11 @@ impl Parser {
 			RefCell::new(Vec::new());
 		    Ok(Rc::new(Expression {parent, base, children}))
 		} else {
-		    // Parsing Error: Un-expected character.
-		    let msg = String::from("Un-expected character");
-		    let pos = peek.position;
-		    Err((msg, pos))
+		    /*
+		    No expression found
+		    When we have more functionality this else branch will change.
+		     */
+		    Ok(Rc::new(Expression::default()))
 		}
 	    }
 	    None => {
