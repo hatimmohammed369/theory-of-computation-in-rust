@@ -252,10 +252,7 @@ impl<'a> Regexp<'a> {
 		    expr.compile(&parser.scanner.borrow().alphabet);
 		Ok(Regexp {pattern, matcher})
 	    }
-	    Err(error) => {
-		eprintln!("{error}");
-		Err(error)
-	    }
+	    Err(error) => Err(error)
 	}
     }
 

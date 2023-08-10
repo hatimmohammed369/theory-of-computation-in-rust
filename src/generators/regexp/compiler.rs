@@ -359,24 +359,20 @@ pub struct RegexpParseError {
     post_message: String
 }
 
-const INDENT: &str = "    "; // 4 spaces
-const INDENT_SIZE: usize = 4;
-
 impl RegexpParseError {
     fn format_error(&self, pattern: &str) -> String {
 	let msg = format!("{}\n", self.message);
 
 	let position = self.position;
 	let mut caret = String::new();
-	caret.push_str(INDENT);
-	while caret.len() < position+INDENT_SIZE
+	while caret.len() < position
 	{caret.push(' ')}
 	caret.push('^');
 	caret.push('\n');
 	let post_message = &self.post_message;
 
 	format!(
-	    "[Parsing Error at {position}]: {msg}{INDENT}{pattern}{caret}\n{post_message}"
+	    "[Parsing Error at {position}]: {msg}{pattern}\n{caret}\n{post_message}"
 	)
     }
 }
@@ -401,6 +397,10 @@ impl Parser {
 
     fn read_current(&self) -> Option<Token> {
 	self.current.borrow().clone()
+    }
+
+    fn read_previous(&self) -> Option<Token> {
+	self.previous.borrow().clone()
     }
 
     fn advance(&self) {
@@ -608,6 +608,13 @@ impl Parser {
     pub fn star(&self) -> Result<Rc<Expression>, RegexpParseError> {
 	let primary = self.primary()?;
 	if self.match_current(TokenType::Star) {
+	    if primary.base.borrow().is_none() {
+		// Could not parse an expression, error
+		let message = String::from("Expected expression before `*`");
+		let position = self.read_previous().unwrap().position;
+		let post_message = String::from("Use \\* to match a literal `*`");
+		return Err(RegexpParseError { message, position, post_message });
+	    }
 	    let star =
 		ExpressionBase::Star {
 		    inner_expr:
