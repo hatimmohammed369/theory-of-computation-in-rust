@@ -492,7 +492,10 @@ impl Parser {
             }
         }
 
-        if concats.len() <= 1 {
+        if concats.is_empty() {
+            // Could not parse any expression.
+            Ok(Rc::new(Expression::default()))
+        } else if concats.len() == 1 {
             Ok(concats.pop().unwrap())
         } else {
             let union = ExpressionBase::Union {
@@ -544,7 +547,10 @@ impl Parser {
             }
         }
 
-        if stars.len() <= 1 {
+        if stars.is_empty() {
+            // Could not parse any expression
+            Ok(Rc::new(Expression::default()))
+        } else if stars.len() <= 1 {
             Ok(stars.pop().unwrap())
         } else {
             let concat = ExpressionBase::Concat {
