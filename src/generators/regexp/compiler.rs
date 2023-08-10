@@ -353,6 +353,34 @@ impl Expression {
     }
 }
 
+pub struct RegexpParseError {
+    message: String,
+    position: usize,
+    post_message: String
+}
+
+const INDENT: &str = "    "; // 4 spaces
+const INDENT_SIZE: usize = 4;
+
+impl RegexpParseError {
+    fn format_error(&self, pattern: &str) -> String {
+	let msg = format!("{}\n", self.message);
+
+	let position = self.position;
+	let mut caret = String::new();
+	caret.push_str(INDENT);
+	while caret.len() < position+INDENT_SIZE
+	{caret.push(' ')}
+	caret.push('^');
+	caret.push('\n');
+	let post_message = &self.post_message;
+
+	format!(
+	    "[Parsing Error at {position}]: {msg}{INDENT}{pattern}{caret}\n{post_message}"
+	)
+    }
+}
+
 pub struct Parser {
     pub scanner: RefCell<Scanner>,
     previous: RefCell<Option<Token>>,
@@ -384,21 +412,26 @@ impl Parser {
 	&self,
 	name: TokenType,
 	message: &str,
-	add_one_to_position: bool
-    ) -> Result<(), (String, usize)> {
+    ) -> Result<(), RegexpParseError> {
 	let message = String::from(message);
 	match self.read_current() {
 	    Some(tok) => {
 		if tok.name != name {
-		    let position = tok.position +
-			if add_one_to_position {1} else {0};
-		    Err((message, position))
+		    let message = String::from(message);
+		    let position = tok.position;
+		    let post_message = String::new();
+		    Err(RegexpParseError { message, position, post_message })
 		} else {
 		    self.advance();
 		    Ok(())
 		}
 	    },
-	    None => Err((message, &self.scanner.borrow().chars.len()-1))
+	    None => {
+		let message = String::from(message);
+		let position = &self.scanner.borrow().chars.len()-1;
+		let post_message = String::new();
+		Err(RegexpParseError { message, position, post_message })
+	    }
 	}
     }
 
@@ -418,39 +451,6 @@ impl Parser {
 	}
     }
 
-    fn format_error(&self, error: (String, usize)) -> String {
-	let (msg, pos) = error;
-	let msg = format!("{msg}\n");
-
-	let mut pattern =
-	    self
-	    .scanner
-	    .borrow()
-	    .chars
-	    .iter()
-	    .fold(
-		String::new(),
-		|a, b| format!("{a}{b}")
-	    );
-	pattern.push('\n');
-
-	let mut indent = String::new(); // 4 spaces
-	indent.push(' ');
-	indent.push(' ');
-	indent.push(' ');
-	indent.push(' ');
-
-	let mut caret = String::new();
-	caret.push_str(&indent);
-	while caret.len() < pos+4 {caret.push(' ')}
-	caret.push('^');
-	caret.push('\n');
-
-	format!(
-	    "[Parsing Error at {pos}]: {msg}{indent}{pattern}{caret}"
-	)
-    }
-
     /*
     Expression => Union
     Union => Concat ( '|' Concat )? ( '|' Concat )*
@@ -462,15 +462,21 @@ impl Parser {
 	self.advance();
 	match self.expression() {
 	    Ok(expr) => Ok(expr),
-	    Err(error_info) => Err(self.format_error(error_info))
+	    Err(error) => {
+		let pattern =
+		    self.scanner.borrow().chars.iter().fold(String::new(), |a, b| format!("{a}{b}"));
+		Err(error.format_error(&pattern))
+	    }
 	}
     }
 
-    pub fn expression(&self) -> Result<Rc<Expression>, (String, usize)> {
+    // Expression => Union
+    pub fn expression(&self) -> Result<Rc<Expression>, RegexpParseError> {
 	self.union()
     }
 
-    pub fn union(&self) -> Result<Rc<Expression>, (String, usize)> {
+    // Union => Concat ( '|' Concat )? ( '|' Concat )*
+    pub fn union(&self) -> Result<Rc<Expression>, RegexpParseError> {
 	let mut concats = Vec::<Rc<Expression>>::new();
 	loop {
 	    match self.concat() {
@@ -536,7 +542,8 @@ impl Parser {
 	}
     }
 
-    pub fn concat(&self) -> Result<Rc<Expression>, (String, usize)> {
+    // Concat => Star Star*
+    pub fn concat(&self) -> Result<Rc<Expression>, RegexpParseError> {
 	let mut stars = Vec::<Rc<Expression>>::new();
 	loop {
 	    match self.star() {
@@ -597,7 +604,8 @@ impl Parser {
 	}
     }
 
-    pub fn star(&self) -> Result<Rc<Expression>, (String, usize)> {
+    // Star => Primary ( '*' )?
+    pub fn star(&self) -> Result<Rc<Expression>, RegexpParseError> {
 	let primary = self.primary()?;
 	if self.match_current(TokenType::Star) {
 	    let star =
@@ -640,7 +648,8 @@ impl Parser {
 	}
     }
 
-    pub fn primary(&self) -> Result<Rc<Expression>, (String, usize)> {
+    // Primary => EMPTY_STRING | SYMBOL | '(' Expression ')'
+    pub fn primary(&self) -> Result<Rc<Expression>, RegexpParseError> {
 	match self.read_current() {
 	    Some(peek) => {
 		if peek.name == TokenType::LeftParen {
@@ -649,7 +658,6 @@ impl Parser {
 		    self.consume(
 			TokenType::RightParen,
 			"Expected `)` after expression.",
-			true
 		    )?;
 
 		    let grouping =
