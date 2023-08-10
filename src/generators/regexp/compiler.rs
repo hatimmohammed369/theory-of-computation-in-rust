@@ -337,10 +337,17 @@ impl RegexpParseError {
     }
 }
 
+enum GroupingType {
+    Parentheses, // ()
+    Range,       // []
+    Multiplier,  // {m, n}
+}
+
 pub struct Parser {
     pub scanner: RefCell<Scanner>,
     previous: RefCell<Option<Token>>,
     current: RefCell<Option<Token>>,
+    groupings: RefCell<Vec<GroupingType>>,
 }
 
 impl Parser {
@@ -348,10 +355,12 @@ impl Parser {
         let scanner = RefCell::new(scanner);
         let previous = RefCell::new(None);
         let current = RefCell::new(None);
+        let groupings = RefCell::new(Vec::new());
         Parser {
             scanner,
             previous,
             current,
+            groupings,
         }
     }
 
@@ -416,6 +425,10 @@ impl Parser {
     }
 
     /*
+    AFTER PARSING EXPRESSION (E), FIELD (current) MUST POINT TO THE FIRST
+    TOKEN AFTER EXPRESSION (E)
+     */
+    /*
     Expression => Union
     Union => Concat ( '|' Concat )? ( '|' Concat )*
     Concat => Star Star*
@@ -440,7 +453,22 @@ impl Parser {
 
     // Expression => Union
     pub fn expression(&self) -> Result<Rc<Expression>, RegexpParseError> {
-        self.union()
+        let parsed_expression = self.union();
+        if let Some(tok) = self.read_current() {
+            if self.groupings.borrow().is_empty() // No active group
+		&& tok.name == TokenType::RightParen
+            {
+                let message = String::from("Un-matched `)`");
+                let position = tok.position;
+                let post_message = String::new();
+                return Err(RegexpParseError {
+                    message,
+                    position,
+                    post_message,
+                });
+            }
+        }
+        parsed_expression
     }
 
     // Union => Concat ( '|' Concat )? ( '|' Concat )*
@@ -600,9 +628,11 @@ impl Parser {
         match self.read_current() {
             Some(peek) => {
                 if peek.name == TokenType::LeftParen {
+                    self.groupings.borrow_mut().push(GroupingType::Parentheses);
                     self.advance();
                     let parsed_expr = self.expression()?;
                     self.consume(TokenType::RightParen, "Expected `)` after expression.")?;
+                    self.groupings.borrow_mut().pop();
 
                     let grouping = ExpressionBase::Grouping {
                         inner_expr: Rc::clone(parsed_expr.base.borrow().as_ref().unwrap()),
