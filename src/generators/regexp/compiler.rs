@@ -1,3 +1,6 @@
+#![allow(unused)]
+#![allow(dead_code)]
+
 use std::collections::HashSet;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -8,6 +11,11 @@ pub enum TokenName {
     LeftParen,
     Star,
     Pipe,
+    EscapedSlash,      // \\
+    EscapedRightParen, // \(
+    EscapedLeftParen,  // \)
+    EscapedStar,       // \*
+    EscapedPipe,       // \|
 }
 
 #[derive(Debug, Clone)]
@@ -57,7 +65,15 @@ impl Iterator for Scanner {
             }
         };
 
-        if !self.empty_string_found {
+        let prev_escaped = {
+            if self.current >= 2 {
+                *self.chars.get(self.current - 2).unwrap_or(&'\0') == '\\'
+            } else {
+                false
+            }
+        };
+
+        if !prev_escaped && !self.empty_string_found {
             if (prev == '\0' && (peek == '\0' || peek == '|'))
                 || (prev == '(' && (peek == '|' || peek == ')'))
                 || (prev == '|' && (peek == '|' || peek == ')' || peek == '\0'))
@@ -103,6 +119,71 @@ impl Iterator for Scanner {
                         lexeme: '|',
                         position: self.current,
                     });
+                }
+                '\\' => {
+                    // EscapedSlash,       \\
+                    // EscapedRightParen,  \(
+                    // EscapedLeftParen,   \)
+                    // EscapedStar,        \*
+                    // EscapedPipe,        \|
+
+                    let next_char = *self.chars.get(self.current + 1).unwrap_or(&'\0');
+                    self.alphabet.insert(next_char);
+                    if next_char == '\\' {
+                        next = Some(Token {
+                            name: TokenName::EscapedSlash,
+                            lexeme: next_char,
+                            position: self.current,
+                        });
+                    } else if next_char == '(' {
+                        next = Some(Token {
+                            name: TokenName::EscapedLeftParen,
+                            lexeme: next_char,
+                            position: self.current,
+                        });
+                    } else if next_char == ')' {
+                        next = Some(Token {
+                            name: TokenName::EscapedRightParen,
+                            lexeme: next_char,
+                            position: self.current,
+                        });
+                    } else if next_char == '*' {
+                        next = Some(Token {
+                            name: TokenName::EscapedStar,
+                            lexeme: next_char,
+                            position: self.current,
+                        });
+                    } else if next_char == '|' {
+                        next = Some(Token {
+                            name: TokenName::EscapedPipe,
+                            lexeme: next_char,
+                            position: self.current,
+                        });
+                    } else {
+                        use std::panic;
+                        let pos = self.current;
+                        let mut caret = String::new();
+                        while caret.len() < pos {
+                            caret.push(' ');
+                        }
+                        caret.push_str("^^");
+                        let pattern = self
+                            .chars
+                            .iter()
+                            .fold(String::new(), |a, b| format!("{a}{b}"));
+
+                        let msg = format!(
+                            "Un-recognized escape sequence\
+				 `\\{next_char}` in position {pos}:\n\
+				 {pattern}\n{caret}\n
+				 "
+                        );
+                        eprint!("{msg}");
+
+                        panic::set_hook(Box::new(|_| {}));
+                        panic!();
+                    }
+                    self.current += 1;
                 }
                 c => {
                     self.alphabet.insert(c);
@@ -659,7 +740,7 @@ impl Parser {
                     returned_expression.children.borrow_mut().push(parsed_expr);
 
                     Ok(returned_expression)
-                } else if peek.name == TokenName::Symbol {
+                } else if peek.name == TokenName::Symbol || Self::is_escaped_token(&peek) {
                     // Single-symbol expression
                     self.advance();
                     let parent = RefCell::new(None);
@@ -698,6 +779,17 @@ impl Parser {
                 // End of input
                 Ok(Rc::new(Expression::default()))
             }
+        }
+    }
+
+    fn is_escaped_token(token: &Token) -> bool {
+        match token.name {
+            TokenName::EscapedSlash
+            | TokenName::EscapedRightParen
+            | TokenName::EscapedLeftParen
+            | TokenName::EscapedStar
+            | TokenName::EscapedPipe => true,
+            _ => false,
         }
     }
 }
