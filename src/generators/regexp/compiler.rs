@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum TokenType {
+pub enum TokenName {
     EmptyString,
     Symbol,
     RightParen,
@@ -12,7 +12,7 @@ pub enum TokenType {
 
 #[derive(Debug, Clone)]
 pub struct Token {
-    pub name: TokenType,
+    pub name: TokenName,
     pub lexeme: char,
     pub position: usize,
 }
@@ -64,7 +64,7 @@ impl Iterator for Scanner {
             {
                 self.alphabet.insert('\0');
                 next = Some(Token {
-                    name: TokenType::EmptyString,
+                    name: TokenName::EmptyString,
                     lexeme: '\0',
                     position: self.current,
                 });
@@ -78,28 +78,28 @@ impl Iterator for Scanner {
             match peek {
                 '(' => {
                     next = Some(Token {
-                        name: TokenType::LeftParen,
+                        name: TokenName::LeftParen,
                         lexeme: '(',
                         position: self.current,
                     });
                 }
                 ')' => {
                     next = Some(Token {
-                        name: TokenType::RightParen,
+                        name: TokenName::RightParen,
                         lexeme: ')',
                         position: self.current,
                     });
                 }
                 '*' => {
                     next = Some(Token {
-                        name: TokenType::Star,
+                        name: TokenName::Star,
                         lexeme: '*',
                         position: self.current,
                     });
                 }
                 '|' => {
                     next = Some(Token {
-                        name: TokenType::Pipe,
+                        name: TokenName::Pipe,
                         lexeme: '|',
                         position: self.current,
                     });
@@ -107,7 +107,7 @@ impl Iterator for Scanner {
                 c => {
                     self.alphabet.insert(c);
                     next = Some(Token {
-                        name: TokenType::Symbol,
+                        name: TokenName::Symbol,
                         lexeme: c,
                         position: self.current,
                     });
@@ -377,7 +377,7 @@ impl Parser {
         *self.current.borrow_mut() = self.scanner.borrow_mut().next();
     }
 
-    fn consume(&self, name: TokenType, message: &str) -> Result<(), RegexpParseError> {
+    fn consume(&self, name: TokenName, message: &str) -> Result<(), RegexpParseError> {
         let message = String::from(message);
         match self.read_current() {
             Some(tok) => {
@@ -408,7 +408,7 @@ impl Parser {
         }
     }
 
-    fn match_current(&self, expected: TokenType) -> bool {
+    fn match_current(&self, expected: TokenName) -> bool {
         if self.check(expected) {
             self.advance();
             true
@@ -417,7 +417,7 @@ impl Parser {
         }
     }
 
-    fn check(&self, expected: TokenType) -> bool {
+    fn check(&self, expected: TokenName) -> bool {
         match self.read_current() {
             Some(tok) => tok.name == expected,
             None => false,
@@ -456,7 +456,7 @@ impl Parser {
         let parsed_expression = self.union()?;
         if let Some(tok) = self.read_current() {
             if self.groupings.borrow().is_empty() // No active group
-		&& tok.name == TokenType::RightParen
+		&& tok.name == TokenName::RightParen
             {
                 let message = String::from("Un-matched `)`");
                 let position = tok.position;
@@ -483,7 +483,7 @@ impl Parser {
                 break;
             }
 
-            if !self.match_current(TokenType::Pipe) {
+            if !self.match_current(TokenName::Pipe) {
                 break;
             }
         }
@@ -582,7 +582,7 @@ impl Parser {
     // Star => Primary ( '*' )?
     pub fn star(&self) -> Result<Rc<Expression>, RegexpParseError> {
         let primary = self.primary()?;
-        if self.match_current(TokenType::Star) {
+        if self.match_current(TokenName::Star) {
             if primary.base.borrow().is_none() {
                 /*
                 Could not parse an expression
@@ -629,11 +629,11 @@ impl Parser {
     pub fn primary(&self) -> Result<Rc<Expression>, RegexpParseError> {
         match self.read_current() {
             Some(peek) => {
-                if peek.name == TokenType::LeftParen {
+                if peek.name == TokenName::LeftParen {
                     self.groupings.borrow_mut().push(GroupingType::Parentheses);
                     self.advance();
                     let parsed_expr = self.expression()?;
-                    self.consume(TokenType::RightParen, "Expected `)` after expression.")?;
+                    self.consume(TokenName::RightParen, "Expected `)` after expression.")?;
                     self.groupings.borrow_mut().pop();
 
                     let grouping = ExpressionBase::Grouping {
@@ -659,7 +659,7 @@ impl Parser {
                     returned_expression.children.borrow_mut().push(parsed_expr);
 
                     Ok(returned_expression)
-                } else if peek.name == TokenType::Symbol {
+                } else if peek.name == TokenName::Symbol {
                     // Single-symbol expression
                     self.advance();
                     let parent = RefCell::new(None);
@@ -672,7 +672,7 @@ impl Parser {
                         base,
                         children,
                     }))
-                } else if peek.name == TokenType::EmptyString {
+                } else if peek.name == TokenName::EmptyString {
                     // Empty string expression
                     // Something like (), (|), ()|(), ...
                     self.advance();
