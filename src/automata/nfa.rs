@@ -1022,6 +1022,28 @@ impl NFA {
         }
     }
 
+    pub fn invert(&mut self) -> &mut NFA {
+        if !self.is_deterministic {
+            let error = format!("NFA::invert: Invoking automaton MUST BE deterministic");
+            eprintln!("{error}");
+            use std::panic;
+            panic::set_hook(Box::new(|_| {}));
+            panic!();
+        }
+        self.accept_states = self
+            .states
+            .difference(&self.accept_states)
+            .map(String::from)
+            .collect::<_>();
+        self
+    }
+
+    pub fn compute_complement(nfa: &NFA) -> NFA {
+        let mut nfa_clone = nfa.clone();
+        Self::invert(&mut nfa_clone);
+        nfa_clone
+    }
+
     pub fn has_empty_language(nfa: &NFA) -> bool {
         if !nfa.accept_states.is_empty() {
             let mut marked = HashSet::<String>::new();
