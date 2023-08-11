@@ -1021,4 +1021,37 @@ impl NFA {
             dfa,
         }
     }
+
+    pub fn has_empty_language(nfa: &NFA) -> bool {
+        if !nfa.accept_states.is_empty() {
+            let mut marked = HashSet::<String>::new();
+            marked.insert(String::from(&nfa.start_state));
+
+            loop {
+                let before = marked.len();
+                marked.clone().iter().for_each(|state| {
+                    nfa.alphabet.iter().for_each(|symbol| {
+                        let new_set = nfa.move_set(&HashSet::from([String::from(state)]), *symbol);
+                        marked.extend(new_set.into_iter());
+                    });
+                });
+
+                if before == marked.len() {
+                    break;
+                }
+            }
+
+            /*
+            Test if the intersection of marked states and accept states is empty
+            Next element in the intersection iterator will be None if so
+             */
+            nfa.accept_states.intersection(&marked).next().is_none()
+        } else {
+            /*
+            No accept states
+            Thus, it's (true) that it recognizes (The Empty Language)
+             */
+            true
+        }
+    }
 }
