@@ -1,9 +1,11 @@
+#![allow(dead_code)]
 // Finite Automata module
 
 use crate::automata::ComputationResult;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::collections::LinkedList;
 use std::rc::Rc;
 
 // (Non-deterministic) Finite Automaton
@@ -54,7 +56,7 @@ pub struct NFA {
     Calling get_dfa on NFA which is already an DFA (is_deterministic = true) clones (self)
     thus it's not a good idea to call this function when is_deterministic flag is set
      */
-    dfa: RefCell<Rc<Option<Box<NFA>>>>,
+    dfa: RefCell<Option<Rc<NFA>>>,
 }
 
 impl NFA {
@@ -197,7 +199,7 @@ impl NFA {
             start_state: String::from(start_state),
             accept_states: accept_states.iter().map(|x| String::from(*x)).collect(),
             is_deterministic: is_deterministic_flag,
-            dfa: RefCell::new(Rc::new(None)),
+            dfa: RefCell::new(None),
         }
     }
 
@@ -211,7 +213,7 @@ impl NFA {
         start_state: String,
         accept_states: HashSet<String>,
         is_deterministic: bool,
-        dfa: RefCell<Rc<Option<Box<NFA>>>>,
+        dfa: RefCell<Option<Rc<NFA>>>,
     ) -> NFA {
         NFA {
             states,
@@ -233,7 +235,7 @@ impl NFA {
             start_state: String::new(),
             accept_states: HashSet::new(),
             is_deterministic,
-            dfa: RefCell::new(Rc::new(None)),
+            dfa: RefCell::new(None),
         }
     }
 
@@ -341,17 +343,15 @@ impl NFA {
             return out;
         }
 
-        let mut new_items = out.clone();
+        let mut new_items = out.iter().map(String::from).collect::<LinkedList<_>>();
         while !new_items.is_empty() {
-            let new_items_iter = new_items.clone();
-            let new_items_iter = new_items_iter.iter();
-            new_items.clear();
-
-            for elem in new_items_iter {
-                if let Some(empty_string_set) = self.read_symbol_states_set(elem, '\0') {
+            let end = new_items.len();
+            for _ in 0..end {
+                let elem = new_items.pop_front().unwrap();
+                if let Some(empty_string_set) = self.read_symbol_states_set(&elem, '\0') {
                     empty_string_set.iter().for_each(|s| {
-                        if out.insert(s.to_string()) {
-                            new_items.insert(s.to_string());
+                        if out.insert(String::from(s)) {
+                            new_items.push_back(String::from(s));
                         }
                     });
                 }
@@ -368,21 +368,15 @@ impl NFA {
     fn move_set(&self, set: &HashSet<String>, symbol: char) -> HashSet<String> {
         let mut out = HashSet::new();
 
-        for q in set {
-            /*
-            Set (x) represents all states reachable from (q) when reading (sybmol)
-             */
-            let mut x = &HashSet::new();
-            if let Some(value) = self.read_symbol_states_set(q, symbol) {
-                x = value;
-            }
-
-            // Exapnd (x) in case there are empty string transitions.
-            let y = self.expand(x);
-            y.iter().for_each(|element| {
-                out.insert(element.to_string());
-            })
-        }
+        set.iter().for_each(|q| {
+            out.extend(
+                self.read_symbol_states_set(q, symbol)
+                    .unwrap_or(&HashSet::new())
+                    .iter()
+                    .map(String::from),
+            )
+        });
+        out = self.expand(&out);
 
         out
     }
@@ -487,19 +481,10 @@ impl NFA {
 
     And thus states sets in the NFA represents single states in the equivalent DFA
      */
-    pub fn to_dfa(&self, sink_state: &str) -> Rc<Option<Box<NFA>>> {
-        if self.is_deterministic || self.dfa.borrow().is_some() {
-            // This automaton is deterministic or the cache is ready
-            // just return the underlying cache.
-            return self.get_dfa();
+    pub fn compute_equivalent_dfa(nfa: &NFA) -> NFA {
+        if nfa.dfa.borrow().is_some() {
+            return nfa.get_dfa().as_ref().clone();
         }
-
-        let mut dfa = NFA::new_empty_nfa(true);
-
-        let mut dfa_alphabet = self.alphabet.clone();
-        dfa_alphabet.remove(&'\0');
-
-        dfa.alphabet = dfa_alphabet.clone();
 
         let mut strings = Vec::<(HashSet<String>, String)>::new();
         let mut stringify_set = |x: &HashSet<String>| {
@@ -510,85 +495,135 @@ impl NFA {
             }
             let mut s = String::new();
             s.push('<');
-            s.push_str(&x.iter().map(|x| x.to_string()).collect::<Vec<String>>()[..].join(", "));
+            s.push_str(&x.iter().map(String::from).collect::<Vec<String>>()[..].join(", "));
             s.push('>');
             strings.push((x.clone(), s.to_string()));
             s
         };
 
-        let start_set = self.expand(&HashSet::from([self.start_state.to_string()]));
-        dfa.start_state = stringify_set(&start_set);
+        let mut states = HashSet::<String>::new();
+        let mut alphabet = nfa.alphabet.clone();
+        alphabet.remove(&'\0');
+        let mut transition_function = HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
-        let sink_state = String::from(sink_state);
+        let mut start_state = HashSet::<String>::from([String::from(&nfa.start_state)]);
+        start_state = nfa.expand(&start_state);
 
-        // The unique sink state set.
-        let sink_state_set = HashSet::from([sink_state.to_string()]);
-        let sink_state_set_name = stringify_set(&sink_state_set);
+        let mut accept_states = HashSet::<String>::new();
 
+        let mut new_sets = LinkedList::from([start_state.clone()]);
+        let start_state = stringify_set(&start_state);
+
+        let sink_state = {
+            let phi = "<>";
+            let phi = format!("{:?}", std::ptr::addr_of!(phi));
+            if nfa.states.contains("<>") {
+                HashSet::from([format!("<{phi}>")])
+            } else {
+                HashSet::new()
+            }
+        };
         {
-            dfa.states.insert(String::from(&sink_state_set_name));
-            let destination = dfa.write_state_symbols_map(&sink_state_set_name);
-            for symbol in &dfa_alphabet {
-                destination.insert(*symbol, HashSet::from([String::from(&sink_state_set_name)]));
+            let sink_state_name = stringify_set(&sink_state);
+            states.insert(sink_state_name.to_string());
+            let sink_state_map = transition_function
+                .entry(String::from(&sink_state_name))
+                .or_insert(HashMap::new());
+            for symbol in &alphabet {
+                sink_state_map.insert(*symbol, HashSet::from([sink_state_name.to_string()]));
             }
         }
 
-        let mut new_items = vec![start_set.clone()];
-        while !new_items.is_empty() {
-            let new_items_iter = new_items.clone();
-            let new_items_iter = new_items_iter.iter();
-            new_items.clear();
-
-            for new_set in new_items_iter {
-                let name = stringify_set(new_set);
-                dfa.states.insert(name.to_string());
-                if new_set.intersection(&self.accept_states).next().is_some() {
-                    // There's at least one accept state.
-                    dfa.accept_states.insert(String::from(&name));
-                }
-
-                let state_symbols_map = dfa.write_state_symbols_map(&name);
-
-                let has_empty_symbols_map = state_symbols_map.is_empty();
-
-                for symbol in &dfa_alphabet {
-                    let moved_new_set = self.move_set(new_set, *symbol);
-                    let moved_new_set_name = stringify_set(&moved_new_set);
-
-                    if has_empty_symbols_map {
-                        new_items.push(moved_new_set.clone());
+        while !new_sets.is_empty() {
+            let end = new_sets.len();
+            for _ in 0..end {
+                let new_set = new_sets.pop_front().unwrap();
+                let name = stringify_set(&new_set);
+                let set_symbols_map = transition_function
+                    .entry(String::from(&name))
+                    .or_insert(HashMap::new());
+                if set_symbols_map.is_empty() {
+                    states.insert(String::from(&name));
+                    if new_set.intersection(&nfa.accept_states).next().is_some() {
+                        accept_states.insert(String::from(&name));
                     }
-
-                    state_symbols_map
-                        .entry(*symbol)
-                        .or_insert(HashSet::new())
-                        .insert({
-                            if moved_new_set.is_empty() {
-                                String::from(&sink_state_set_name)
+                    for symbol in &alphabet {
+                        let moved_new_set = {
+                            let x = nfa.move_set(&new_set, *symbol);
+                            if x.is_empty() {
+                                sink_state.clone()
                             } else {
-                                String::from(&moved_new_set_name)
+                                x
                             }
-                        });
+                        };
+                        new_sets.push_back(moved_new_set.clone());
+                        set_symbols_map
+                            .insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
+                    }
                 }
             }
         }
 
-        *self.dfa.borrow_mut() = Rc::new(Some(Box::new(dfa)));
-        self.get_dfa()
+        let is_deterministic = true;
+        let dfa = RefCell::new(None);
+
+        NFA {
+            states,
+            alphabet,
+            transition_function,
+            start_state,
+            accept_states,
+            is_deterministic,
+            dfa,
+        }
     }
 
-    pub fn get_dfa(&self) -> Rc<Option<Box<NFA>>> {
-        if self.is_deterministic && self.dfa.borrow().is_none() {
-            *self.dfa.borrow_mut() = Rc::new(Some(Box::new(self.clone())));
+    pub fn transform_to_dfa(&mut self) -> &mut Self {
+        let NFA {
+            states,
+            transition_function,
+            start_state,
+            accept_states,
+            ..
+        } = Self::compute_equivalent_dfa(self);
+
+        self.states.clear();
+        self.states.extend(states.into_iter());
+        self.alphabet.remove(&'\0');
+        self.transition_function.clear();
+        self.transition_function
+            .extend(transition_function.into_iter());
+        self.start_state.clear();
+        self.start_state.push_str(&start_state);
+        self.accept_states.clear();
+        self.accept_states.extend(accept_states.into_iter());
+        self.is_deterministic = true;
+
+        self
+    }
+
+    pub fn get_dfa(&self) -> Rc<NFA> {
+        if self.dfa.borrow().is_none() {
+            let dfa = {
+                let automaton = {
+                    if self.is_deterministic {
+                        self.clone()
+                    } else {
+                        Self::compute_equivalent_dfa(self)
+                    }
+                };
+
+                Some(Rc::new(automaton))
+            };
+
+            *self.dfa.borrow_mut() = dfa;
         }
+        // Ref<Option<Rc<NFA>>>
+        let dfa = self.dfa.borrow();
+        // &Rc<NFA>
+        let dfa = dfa.as_ref().unwrap();
 
-        let x = &self.dfa;
-
-        let x = x.borrow();
-
-        // Rc< Option< Box<NFA> > >
-
-        Rc::clone(&x)
+        Rc::clone(dfa)
     }
 
     /*
@@ -807,7 +842,7 @@ impl NFA {
         }
 
         let is_deterministic = false;
-        let dfa = RefCell::new(Rc::new(None));
+        let dfa = RefCell::new(None);
 
         NFA {
             states,
@@ -908,7 +943,7 @@ impl NFA {
         }
 
         let is_deterministic = false;
-        let dfa = RefCell::new(Rc::new(None));
+        let dfa = RefCell::new(None);
 
         NFA {
             states,
@@ -1002,7 +1037,7 @@ impl NFA {
 
         let start_state = style(&automata[0].start_state, 0);
         let is_deterministic = false;
-        let dfa = RefCell::new(Rc::new(None));
+        let dfa = RefCell::new(None);
         let accept_states = automata
             .last()
             .unwrap()
@@ -1070,7 +1105,7 @@ impl NFA {
             nfa.accept_states.intersection(&marked).next().is_none()
         } else {
             /*
-            No accept states
+            This automaton has no accept states
             Thus, it's (true) that it recognizes (The Empty Language)
              */
             true

@@ -325,7 +325,7 @@ impl ExpressionBase {
 
         let alphabet = alphabet.clone();
         let is_deterministic = false;
-        let dfa = RefCell::new(Rc::new(None));
+        let dfa = RefCell::new(None);
 
         NFA::raw_new(
             states,
