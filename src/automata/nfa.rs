@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
 // Finite Automata module
 
 use crate::automata::ComputationResult;
@@ -396,7 +398,7 @@ impl NFA {
         if log {
             eprintln!();
             eprintln!("########################################");
-            println!("Computing on input `{input}` . . .\n");
+            eprintln!("Computing on input `{input}` . . .\n");
         }
 
         for next_symbol in input.chars() {
@@ -409,7 +411,7 @@ impl NFA {
              */
 
             if log {
-                println!("{:?} reading `{next_symbol}`", &automaton_states);
+                eprintln!("{:?} reading `{next_symbol}`", &automaton_states);
             }
             if !self.alphabet.contains(&next_symbol) {
                 return Err(format!(
@@ -422,7 +424,7 @@ impl NFA {
             automaton_states = self.move_set(&automaton_states, next_symbol);
 
             if log {
-                println!("=> {:?}", automaton_states);
+                eprintln!("=> {:?}", automaton_states);
             }
             if automaton_states.is_empty() {
                 return Err(
@@ -1109,6 +1111,171 @@ impl NFA {
             Thus, it's (true) that it recognizes (The Empty Language)
              */
             true
+        }
+    }
+
+    pub fn intersection<'a>(automata: impl Iterator<Item = &'a NFA>) -> NFA {
+        let automata = automata.collect::<Vec<&NFA>>();
+
+        let stringify_set = |x: &Vec<String>| {
+            let mut s = String::new();
+            s.push('(');
+            s.push_str(&{
+                let mut elements = String::new();
+                for elem in x {
+                    elements.push_str(&format!("{elem}, "))
+                }
+                elements.pop();
+                elements.pop();
+                elements
+            });
+            s.push(')');
+            s
+        };
+
+        let product = |sets: &[&HashSet<String>]| -> Vec<Vec<String>> {
+            let mut product = LinkedList::<Vec<String>>::new();
+            product.push_front(vec![]);
+            for tuple_size in 0..sets.len() {
+                let end = product.len();
+                for _ in 0..end {
+                    let mut front = product.pop_front().unwrap();
+                    let mut set = sets[tuple_size];
+                    if set.is_empty() {
+                        return vec![];
+                    } else {
+                        for element in set {
+                            front.push(element.to_string());
+                            product.push_back(front.clone());
+                            front.pop();
+                        }
+                    }
+                }
+            }
+            let product = product.into_iter().collect::<Vec<_>>();
+            product
+        };
+
+        let mut states = {
+            let states_sets_array = automata.iter().map(|nfa| &nfa.states).collect::<Vec<_>>();
+            let states_sets_array = &states_sets_array[..];
+            let states = product(states_sets_array)
+                .into_iter()
+                .map(|tuple| {
+                    let name = stringify_set(&tuple);
+                    (tuple, name)
+                })
+                .collect::<Vec<_>>();
+            states
+        };
+
+        let the_dead_state = format!("<{:?}>", std::ptr::addr_of!(states));
+        let dead_state_set = HashSet::from([the_dead_state.to_string()]);
+        let mut used_dead_state = false;
+
+        let alphabet = {
+            let mut alphabet = HashSet::<char>::new();
+            for nfa in &automata {
+                alphabet.extend(nfa.alphabet.iter());
+            }
+            alphabet
+        };
+
+        let transition_function = {
+            let mut transition_function = HashMap::<String, HashMap<char, HashSet<String>>>::new();
+            for (state, name) in &states {
+                let state_map = transition_function
+                    .entry(name.to_string())
+                    .or_insert(HashMap::new());
+                for symbol in &alphabet {
+                    /*
+                    HashSet at position (i) is states reachable from state[i] in automata[i] when reading (symbol)
+                     */
+                    let outputs = state
+                        .iter()
+                        .enumerate()
+                        .map(|(idx, elem_state)| {
+                            automata[idx]
+                                .move_set(&HashSet::from([elem_state.to_string()]), *symbol)
+                        })
+                        .collect::<Vec<_>>();
+                    let outputs = outputs.iter().collect::<Vec<_>>();
+                    let outputs = &outputs[..];
+                    let outputs = product(outputs);
+                    if outputs.is_empty() {
+                        state_map.insert(*symbol, dead_state_set.clone());
+                        used_dead_state = true;
+                    } else {
+                        let outputs = outputs
+                            .iter()
+                            .map(|tuple| stringify_set(tuple))
+                            .collect::<HashSet<_>>();
+                        state_map.insert(*symbol, outputs);
+                    }
+                }
+            }
+
+            if used_dead_state {
+                let dead_state_name = the_dead_state.to_string();
+                states.push((
+                    vec![dead_state_name.to_string()],
+                    dead_state_name.to_string(),
+                ));
+                transition_function
+                    .entry(the_dead_state.to_string())
+                    .or_insert(HashMap::new())
+                    .extend(
+                        alphabet
+                            .iter()
+                            .map(|symbol| (*symbol, dead_state_set.clone())),
+                    );
+            }
+
+            transition_function
+        };
+
+        let start_state = {
+            let mut start_state = Vec::<String>::new();
+            for nfa in &automata {
+                start_state.push(nfa.start_state.to_string());
+            }
+            stringify_set(&start_state)
+        };
+
+        let accept_states = {
+            let states_array = automata
+                .iter()
+                .map(|nfa| &nfa.accept_states)
+                .collect::<Vec<_>>();
+            let states_array = &states_array[..];
+            let mut accept_states = product(states_array);
+            if accept_states.len() == 1 && accept_states.last().as_ref().unwrap().is_empty() {
+                accept_states.clear();
+            }
+            let accept_states = accept_states
+                .iter()
+                .map(|accepting_tuple| stringify_set(accepting_tuple))
+                .collect::<HashSet<_>>();
+
+            accept_states
+        };
+
+        let states = states
+            .into_iter()
+            .map(|(state, name)| name)
+            .collect::<HashSet<_>>();
+
+        let is_deterministic = true;
+        let dfa = RefCell::new(None);
+
+        NFA {
+            states,
+            alphabet,
+            transition_function,
+            start_state,
+            accept_states,
+            is_deterministic,
+            dfa,
         }
     }
 }
