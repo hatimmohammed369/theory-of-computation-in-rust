@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::collections::LinkedList;
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 // (Non-deterministic) Finite Automaton
 #[derive(Debug, Clone)]
@@ -62,6 +63,12 @@ pub struct NFA {
 }
 
 impl NFA {
+    // Generate time for to be used in states
+    fn now() -> String {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).ok().unwrap();
+        let now = now.as_secs();
+        format!("{now:#x}")
+    }
     pub fn new(
         /*
         Ignore additional elements in parameter `states`
@@ -516,26 +523,13 @@ impl NFA {
         let mut new_sets = LinkedList::from([start_state.clone()]);
         let start_state = stringify_set(&start_state);
 
-        let sink_state = {
-            let phi = "<>";
-            let phi = format!("{:?}", std::ptr::addr_of!(phi));
-            if nfa.states.contains("<>") {
-                HashSet::from([format!("<{phi}>")])
-            } else {
-                HashSet::new()
-            }
-        };
-        {
-            let sink_state_name = stringify_set(&sink_state);
-            states.insert(sink_state_name.to_string());
-            let sink_state_map = transition_function
-                .entry(String::from(&sink_state_name))
-                .or_insert(HashMap::new());
-            for symbol in &alphabet {
-                sink_state_map.insert(*symbol, HashSet::from([sink_state_name.to_string()]));
-            }
-        }
+        let sink_state = HashSet::from([format!(
+            "({name}@{{{now}}})",
+            name = "<DFA-SINK>",
+            now = Self::now(),
+        )]);
 
+        let mut used_sink_state = false;
         while !new_sets.is_empty() {
             let end = new_sets.len();
             for _ in 0..end {
@@ -553,6 +547,7 @@ impl NFA {
                         let moved_new_set = {
                             let x = nfa.move_set(&new_set, *symbol);
                             if x.is_empty() {
+                                used_sink_state = true;
                                 sink_state.clone()
                             } else {
                                 x
@@ -563,6 +558,16 @@ impl NFA {
                             .insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
                     }
                 }
+            }
+        }
+        if used_sink_state {
+            let sink_state_name = stringify_set(&sink_state);
+            states.insert(sink_state_name.to_string());
+            let sink_state_map = transition_function
+                .entry(String::from(&sink_state_name))
+                .or_insert(HashMap::new());
+            for symbol in &alphabet {
+                sink_state_map.insert(*symbol, HashSet::from([sink_state_name.to_string()]));
             }
         }
 
@@ -581,6 +586,10 @@ impl NFA {
     }
 
     pub fn transform_to_dfa(&mut self) -> &mut Self {
+        if self.is_deterministic {
+            return self;
+        }
+
         let NFA {
             states,
             transition_function,
@@ -812,11 +821,11 @@ impl NFA {
 
     pub fn kleene_star(nfa: &NFA, star_start_state: &str) -> NFA {
         // The new start state, kleene starred NFA start state
-        let mut start_state = String::from(star_start_state);
-
-        if nfa.states.contains(star_start_state) {
-            start_state = format!("{:?}", &start_state as *const String);
-        }
+        let start_state = format!(
+            "({name}@{{{now}}})",
+            name = star_start_state,
+            now = Self::now(),
+        );
 
         let mut states = nfa.states.clone();
         states.insert(String::from(&start_state));
@@ -1084,7 +1093,10 @@ impl NFA {
     pub fn has_empty_language(nfa: &NFA) -> bool {
         if !nfa.accept_states.is_empty() {
             let mut marked = HashSet::<String>::new();
-            marked.insert(String::from(&nfa.start_state));
+            marked.extend(
+                nfa.expand(&HashSet::from([nfa.start_state.to_string()]))
+                    .into_iter(),
+            );
 
             loop {
                 let before = marked.len();
@@ -1169,7 +1181,11 @@ impl NFA {
             states
         };
 
-        let the_dead_state = format!("<{:?}>", std::ptr::addr_of!(states));
+        let the_dead_state = format!(
+            "({name}@{{{now}}})",
+            name = "<INTERSECTION-SINK>",
+            now = Self::now()
+        );
         let dead_state_set = HashSet::from([the_dead_state.to_string()]);
         let mut used_dead_state = false;
 
