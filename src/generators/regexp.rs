@@ -226,7 +226,7 @@ fn debug_expression(root: &Rc<Expression>) {
                 new_children += children.len();
                 let children = children
                     .iter()
-                    .map(|rc| Rc::clone(rc))
+                    .map(Rc::clone)
                     .collect::<Vec<Rc<Expression>>>();
                 children.into_iter()
             });

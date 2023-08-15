@@ -69,6 +69,7 @@ impl NFA {
         let now = now.as_secs();
         format!("{now:#x}")
     }
+
     pub fn new(
         /*
         Ignore additional elements in parameter `states`
@@ -104,14 +105,14 @@ impl NFA {
         if !states.contains(&start_state) {
             eprintln!("Warning: Start State `{start_state}` is not in the states array");
         }
-        states_set.insert(String::from(start_state)); // Do not forget adjoining the start state.
+        states_set.insert(start_state.to_string()); // Do not forget adjoining the start state.
 
         // Issue warnings for each accepting state not in parameter `states`.
         accept_states.iter().for_each(|x| {
             if !states.contains(x) {
                 eprintln!("Warning: Accept State `{x}` is not in the states array");
             }
-            states_set.insert(String::from(*x));
+            states_set.insert(x.to_string());
         });
 
         // The final transition function of the new object.
@@ -131,7 +132,7 @@ impl NFA {
             processed_states.insert(state);
             alphabet_set.insert(symbol);
 
-            states_set.insert(String::from(state)); // mark this state as used.
+            states_set.insert(state.to_string()); // mark this state as used.
 
             if infer_type {
                 // Try inferring the new object type if the function was intructed to do so.
@@ -154,13 +155,13 @@ impl NFA {
 
             // Automatically create new entries in transition function map when missing
             let destination = function
-                .entry(String::from(state))
+                .entry(state.to_string())
                 .or_insert(HashMap::new())
                 .entry(symbol)
                 .or_insert(HashSet::new());
             items.iter().for_each(|x| {
-                destination.insert(String::from(*x));
-                states_set.insert(String::from(*x));
+                destination.insert(x.to_string());
+                states_set.insert(x.to_string());
                 if !states.contains(x) {
                     eprintln!("Warning: State `{x}` is not in the states array");
                     eprintln!("Found in transition {:?}", item);
@@ -201,12 +202,13 @@ impl NFA {
         } else {
             is_deterministic
         };
+
         NFA {
             states: states_set,
             alphabet: alphabet_set,
             transition_function: function,
-            start_state: String::from(start_state),
-            accept_states: accept_states.iter().map(|x| String::from(*x)).collect(),
+            start_state: start_state.to_string(),
+            accept_states: accept_states.iter().map(|x| x.to_string()).collect(),
             is_deterministic: is_deterministic_flag,
             dfa: RefCell::new(None),
         }
@@ -359,8 +361,8 @@ impl NFA {
                 let elem = new_items.pop_front().unwrap();
                 if let Some(empty_string_set) = self.read_symbol_states_set(&elem, '\0') {
                     empty_string_set.iter().for_each(|s| {
-                        if out.insert(String::from(s)) {
-                            new_items.push_back(String::from(s));
+                        if out.insert(s.to_string()) {
+                            new_items.push_back(s.to_string());
                         }
                     });
                 }
@@ -495,16 +497,25 @@ impl NFA {
             return nfa.get_dfa().as_ref().clone();
         }
 
+        /*
+        Cache each set along with its string representation
+        we can cache the string representation because iterating a HashSet is random
+        thus the same HashSet will have difference strings each time closure stringift_set is invoked
+        */
         let mut strings = Vec::<(HashSet<String>, String)>::new();
         let mut stringify_set = |x: &HashSet<String>| {
             for (set, string) in &strings {
                 if set.is_subset(x) && x.is_subset(set) {
-                    return String::from(string);
+                    return string.to_string();
                 }
             }
             let mut s = String::new();
             s.push('<');
-            s.push_str(&x.iter().map(String::from).collect::<Vec<String>>()[..].join(", "));
+            s.push_str(&{
+                let mut iter = x.iter();
+                let first = iter.next().unwrap().to_string();
+                iter.fold(first, |a, b| format!("{a}, {b}"))
+            });
             s.push('>');
             strings.push((x.clone(), s.to_string()));
             s
@@ -515,13 +526,10 @@ impl NFA {
         alphabet.remove(&'\0');
         let mut transition_function = HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
-        let mut start_state = HashSet::<String>::from([String::from(&nfa.start_state)]);
+        let mut start_state = HashSet::<String>::from([nfa.start_state.to_string()]);
         start_state = nfa.expand(&start_state);
 
         let mut accept_states = HashSet::<String>::new();
-
-        let mut new_sets = LinkedList::from([start_state.clone()]);
-        let start_state = stringify_set(&start_state);
 
         let sink_state = HashSet::from([format!(
             "({name}@{{{now}}})",
@@ -529,45 +537,44 @@ impl NFA {
             now = Self::now(),
         )]);
 
+        let mut new_sets = LinkedList::from([start_state.clone()]);
+        let start_state = stringify_set(&start_state);
         let mut used_sink_state = false;
-        while !new_sets.is_empty() {
-            let end = new_sets.len();
-            for _ in 0..end {
-                let new_set = new_sets.pop_front().unwrap();
-                let name = stringify_set(&new_set);
-                let set_symbols_map = transition_function
-                    .entry(String::from(&name))
-                    .or_insert(HashMap::new());
-                if set_symbols_map.is_empty() {
-                    states.insert(String::from(&name));
-                    if new_set.intersection(&nfa.accept_states).next().is_some() {
-                        accept_states.insert(String::from(&name));
-                    }
-                    for symbol in &alphabet {
-                        let moved_new_set = {
-                            let x = nfa.move_set(&new_set, *symbol);
-                            if x.is_empty() {
-                                used_sink_state = true;
-                                sink_state.clone()
-                            } else {
-                                x
-                            }
-                        };
-                        new_sets.push_back(moved_new_set.clone());
-                        set_symbols_map
-                            .insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
-                    }
+
+        while let Some(new_set) = new_sets.pop_front() {
+            let name = stringify_set(&new_set);
+            let set_symbols_map = transition_function
+                .entry(name.to_string())
+                .or_insert(HashMap::new());
+            if set_symbols_map.is_empty() {
+                states.insert(name.to_string());
+                if new_set.intersection(&nfa.accept_states).next().is_some() {
+                    accept_states.insert(name.to_string());
+                }
+                for symbol in &alphabet {
+                    let moved_new_set = {
+                        let x = nfa.move_set(&new_set, *symbol);
+                        if x.is_empty() {
+                            used_sink_state = true;
+                            sink_state.clone()
+                        } else {
+                            x
+                        }
+                    };
+                    set_symbols_map.insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
+                    new_sets.push_back(moved_new_set);
                 }
             }
         }
+
         if used_sink_state {
             let sink_state_name = stringify_set(&sink_state);
             states.insert(sink_state_name.to_string());
             let sink_state_map = transition_function
-                .entry(String::from(&sink_state_name))
+                .entry(sink_state_name)
                 .or_insert(HashMap::new());
             for symbol in &alphabet {
-                sink_state_map.insert(*symbol, HashSet::from([sink_state_name.to_string()]));
+                sink_state_map.insert(*symbol, sink_state.clone());
             }
         }
 
@@ -661,9 +668,6 @@ impl NFA {
             if !fake_states.is_empty() {
                 panic!("States `{:?}` do not exist!", fake_states);
             }
-        }
-        if !self.is_deterministic {
-            panic!("Invoking automaton must be deterministic");
         }
         if self.states.contains(g_start_state) {
             panic!("Choose another start state");
@@ -818,7 +822,6 @@ impl NFA {
     For each accepting state in (N) add an empty string transition leading to
     the start state of (N)
      */
-
     pub fn kleene_star(nfa: &NFA, star_start_state: &str) -> NFA {
         // The new start state, kleene starred NFA start state
         let start_state = format!(
@@ -828,7 +831,7 @@ impl NFA {
         );
 
         let mut states = nfa.states.clone();
-        states.insert(String::from(&start_state));
+        states.insert(start_state.to_string());
 
         let mut alphabet = nfa.alphabet.clone();
         alphabet.insert('\0'); // if missing
@@ -836,7 +839,7 @@ impl NFA {
         let mut transition_function = nfa.transition_function.clone();
 
         let mut accept_states = nfa.accept_states.clone();
-        accept_states.insert(String::from(&start_state));
+        accept_states.insert(start_state.to_string());
 
         for accept_state in &accept_states {
             /*
@@ -845,11 +848,11 @@ impl NFA {
              */
 
             transition_function
-                .entry(String::from(accept_state))
+                .entry(accept_state.to_string())
                 .or_insert(HashMap::<char, HashSet<String>>::new())
                 .entry('\0')
                 .or_insert(HashSet::<String>::new())
-                .insert(String::from(&nfa.start_state));
+                .insert(nfa.start_state.to_string());
         }
 
         let is_deterministic = false;
@@ -875,16 +878,16 @@ impl NFA {
      */
     pub fn union<'a>(automata: impl Iterator<Item = &'a NFA>, union_start_state: &str) -> NFA {
         // The new start state for the union NFA
-        let start_state = String::from(union_start_state);
+        let start_state = union_start_state.to_string();
 
-        let mut states = HashSet::<String>::from([String::from(&start_state)]);
+        let mut states = HashSet::<String>::from([start_state.to_string()]);
         let mut alphabet = HashSet::<char>::from(['\0']);
 
         let mut accept_states = HashSet::<String>::new();
         let mut transition_function = HashMap::<String, HashMap<char, HashSet<String>>>::new();
 
         transition_function.insert(
-            String::from(&start_state),
+            start_state.to_string(),
             HashMap::from([('\0', HashSet::new())]),
         );
 
@@ -917,7 +920,7 @@ impl NFA {
                 let name = style(s, counter);
 
                 // insert the styled name into the states set of the union automaton
-                states.insert(String::from(&name));
+                states.insert(name.to_string());
 
                 /*
                 If this state in currently process automaton has some transitions
@@ -932,7 +935,7 @@ impl NFA {
                             .iter()
                             .map(|elem| {
                                 let elem = style(elem, counter);
-                                states.insert(String::from(&elem));
+                                states.insert(elem.to_string());
                                 elem
                             })
                             .collect::<HashSet<String>>();
@@ -1000,7 +1003,7 @@ impl NFA {
                 let name = style(s, counter);
 
                 // insert the styled name into the states set of the union automaton
-                states.insert(String::from(&name));
+                states.insert(name.to_string());
 
                 /*
                 If this state in currently process automaton has some transitions
@@ -1015,7 +1018,7 @@ impl NFA {
                             .iter()
                             .map(|elem| {
                                 let elem = style(elem, counter);
-                                states.insert(String::from(&elem));
+                                states.insert(elem.to_string());
                                 elem
                             })
                             .collect::<HashSet<String>>();
@@ -1041,7 +1044,7 @@ impl NFA {
                         .or_insert(HashMap::<char, HashSet<String>>::new())
                         .entry('\0')
                         .or_insert(HashSet::<String>::new())
-                        .insert(String::from(&next_start_state));
+                        .insert(next_start_state.to_string());
                 }
             }
         }
@@ -1070,10 +1073,8 @@ impl NFA {
 
     pub fn invert(&mut self) -> &mut NFA {
         if !self.is_deterministic {
-            let error = format!("NFA::invert: Invoking automaton MUST BE deterministic");
-            eprintln!("{error}");
-            use std::panic;
-            panic::set_hook(Box::new(|_| {}));
+            eprintln!("NFA::invert: Invoking automaton MUST BE deterministic");
+            std::panic::set_hook(Box::new(|_| {}));
             panic!();
         }
         self.accept_states = self
@@ -1092,22 +1093,24 @@ impl NFA {
 
     pub fn has_empty_language(nfa: &NFA) -> bool {
         if !nfa.accept_states.is_empty() {
-            let mut marked = HashSet::<String>::new();
-            marked.extend(
+            let mut marked_states = HashSet::<String>::new();
+            marked_states.extend(
                 nfa.expand(&HashSet::from([nfa.start_state.to_string()]))
                     .into_iter(),
             );
 
             loop {
-                let before = marked.len();
-                marked.clone().iter().for_each(|state| {
-                    nfa.alphabet.iter().for_each(|symbol| {
-                        let new_set = nfa.move_set(&HashSet::from([String::from(state)]), *symbol);
-                        marked.extend(new_set.into_iter());
-                    });
-                });
+                let before = marked_states.len();
+                for marked_state in marked_states.clone() {
+                    for symbol in &nfa.alphabet {
+                        marked_states.extend(
+                            nfa.move_set(&HashSet::from([marked_state.to_string()]), *symbol)
+                                .into_iter(),
+                        );
+                    }
+                }
 
-                if before == marked.len() {
+                if before == marked_states.len() {
                     break;
                 }
             }
@@ -1116,7 +1119,10 @@ impl NFA {
             Test if the intersection of marked states and accept states is empty
             Next element in the intersection iterator will be None if so
              */
-            nfa.accept_states.intersection(&marked).next().is_none()
+            nfa.accept_states
+                .intersection(&marked_states)
+                .next()
+                .is_none()
         } else {
             /*
             This automaton has no accept states
@@ -1148,7 +1154,7 @@ impl NFA {
         let product = |sets: &[&HashSet<String>]| -> Vec<Vec<String>> {
             let mut product = LinkedList::<Vec<String>>::new();
             product.push_front(vec![]);
-            for tuple_size in 0..sets.len() {
+            for (tuple_size, set) in sets.iter().enumerate() {
                 let end = product.len();
                 for _ in 0..end {
                     let mut front = product.pop_front().unwrap();
@@ -1164,21 +1170,21 @@ impl NFA {
                     }
                 }
             }
-            let product = product.into_iter().collect::<Vec<_>>();
-            product
+
+            product.into_iter().collect::<Vec<_>>()
         };
 
         let mut states = {
             let states_sets_array = automata.iter().map(|nfa| &nfa.states).collect::<Vec<_>>();
             let states_sets_array = &states_sets_array[..];
-            let states = product(states_sets_array)
+
+            product(states_sets_array)
                 .into_iter()
                 .map(|tuple| {
                     let name = stringify_set(&tuple);
                     (tuple, name)
                 })
-                .collect::<Vec<_>>();
-            states
+                .collect::<Vec<_>>()
         };
 
         let the_dead_state = format!(

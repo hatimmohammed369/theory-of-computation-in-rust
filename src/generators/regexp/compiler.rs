@@ -463,7 +463,6 @@ impl Parser {
         match self.read_current() {
             Some(tok) => {
                 if tok.name != name {
-                    let message = String::from(message);
                     let position = tok.position;
                     let post_message = String::new();
                     Err(RegexpParseError {
@@ -477,7 +476,6 @@ impl Parser {
                 }
             }
             None => {
-                let message = String::from(message);
                 let position = &self.scanner.borrow().chars.len() - 1;
                 let post_message = String::new();
                 Err(RegexpParseError {
@@ -783,13 +781,13 @@ impl Parser {
     }
 
     fn is_escaped_token(token: &Token) -> bool {
-        match token.name {
+        matches!(
+            token.name,
             TokenName::EscapedSlash
-            | TokenName::EscapedRightParen
-            | TokenName::EscapedLeftParen
-            | TokenName::EscapedStar
-            | TokenName::EscapedPipe => true,
-            _ => false,
-        }
+                | TokenName::EscapedRightParen
+                | TokenName::EscapedLeftParen
+                | TokenName::EscapedStar
+                | TokenName::EscapedPipe
+        )
     }
 }
