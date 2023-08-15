@@ -1132,9 +1132,20 @@ impl NFA {
         }
     }
 
-    pub fn intersection<'a>(automata: impl Iterator<Item = &'a NFA>) -> NFA {
-        let automata = automata.collect::<Vec<&NFA>>();
-
+    pub fn intersection(automata: &[&NFA]) -> NFA {
+        {
+            let mut error = String::new();
+            for (idx, nfa) in automata.iter().enumerate() {
+                if !nfa.is_deterministic {
+                    error.push_str(&format!("NFA in index {idx} is not deterministic!\n"));
+                }
+            }
+            if !error.is_empty() {
+                eprintln!("NFA::intersection: {error}");
+                std::panic::set_hook(Box::new(|_| {}));
+                panic!();
+            }
+        }
         let stringify_set = |x: &Vec<String>| {
             let mut s = String::new();
             s.push('(');
@@ -1197,7 +1208,7 @@ impl NFA {
 
         let alphabet = {
             let mut alphabet = HashSet::<char>::new();
-            for nfa in &automata {
+            for nfa in automata {
                 alphabet.extend(nfa.alphabet.iter());
             }
             alphabet
@@ -1258,7 +1269,7 @@ impl NFA {
 
         let start_state = {
             let mut start_state = Vec::<String>::new();
-            for nfa in &automata {
+            for nfa in automata {
                 start_state.push(nfa.start_state.to_string());
             }
             stringify_set(&start_state)
