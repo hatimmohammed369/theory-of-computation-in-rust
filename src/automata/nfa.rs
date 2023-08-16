@@ -1412,4 +1412,50 @@ impl NFA {
 
         nfa
     }
+
+    pub fn add_missing_transitions(nfa: &mut Self) -> &mut Self {
+        let sink_state_name = format!("({name}@{{{now}}})", name = "SINK", now = Self::now());
+        let sink_state_set = HashSet::from([sink_state_name.to_string()]);
+        let mut alphabet = nfa.alphabet.clone();
+        alphabet.remove(&'\0');
+
+        let mut used_sink_state = false;
+        for state in &nfa.states {
+            let state_map = nfa
+                .transition_function
+                .entry(state.to_string())
+                .or_insert(HashMap::new());
+            if state_map.is_empty() {
+                used_sink_state = true;
+                state_map.extend(
+                    alphabet
+                        .iter()
+                        .map(|symbol| (*symbol, sink_state_set.clone())),
+                );
+            } else {
+                for symbol in &alphabet {
+                    let symbol_set = state_map.entry(*symbol).or_insert(HashSet::new());
+                    if symbol_set.is_empty() {
+                        used_sink_state = true;
+                        symbol_set.insert(sink_state_name.to_string());
+                    }
+                }
+            }
+        }
+
+        if used_sink_state {
+            nfa.states.insert(sink_state_name.to_string());
+            let sink_state_map = nfa
+                .transition_function
+                .entry(sink_state_name.to_string())
+                .or_insert(HashMap::new());
+            sink_state_map.extend(
+                alphabet
+                    .iter()
+                    .map(|symbol| (*symbol, sink_state_set.clone())),
+            );
+        }
+
+        nfa
+    }
 }
