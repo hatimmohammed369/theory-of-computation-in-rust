@@ -512,9 +512,13 @@ impl NFA {
             let mut s = String::new();
             s.push('<');
             s.push_str(&{
-                let mut iter = x.iter();
-                let first = iter.next().unwrap().to_string();
-                iter.fold(first, |a, b| format!("{a}, {b}"))
+                let mut elements = String::new();
+                for elem in x {
+                    elements.push_str(&format!("{elem}, "))
+                }
+                elements.pop();
+                elements.pop();
+                elements
             });
             s.push('>');
             strings.push((x.clone(), s.to_string()));
@@ -1310,5 +1314,102 @@ impl NFA {
             is_deterministic,
             dfa,
         }
+    }
+
+    pub fn eliminate_epsilon_transitions(nfa: &mut Self) -> &mut Self {
+        let mut strings = Vec::<(HashSet<String>, String)>::new();
+        let mut stringify_set = |x: &HashSet<String>| -> String {
+            for (set, name) in &strings {
+                if set.is_subset(x) && x.is_subset(set) {
+                    return name.to_string();
+                }
+            }
+            let mut s = String::new();
+            s.push('{');
+            s.push_str(&{
+                let mut elements = String::new();
+                for elem in x {
+                    elements.push_str(&format!("{elem}, "))
+                }
+                elements.pop();
+                elements.pop();
+                elements
+            });
+            s.push('}');
+            strings.push((x.clone(), s.to_string()));
+            s
+        };
+
+        nfa.alphabet.remove(&'\0');
+
+        let start_state_set = nfa.expand(&HashSet::from([nfa.start_state.to_string()]));
+        let mut states_set = HashSet::<String>::new();
+        let mut transitions = HashMap::<String, HashMap<char, HashSet<String>>>::new();
+        let mut final_states = HashSet::<String>::new();
+
+        let sink_state_set = HashSet::from([format!(
+            "({name}@{{{now}}})",
+            name = "ETESS", // EpsilonTransitionsEliminationSinkState
+            now = Self::now()
+        )]);
+        let mut used_sink_state = false;
+
+        let mut states_queue = LinkedList::from([start_state_set.clone()]);
+        while let Some(front) = states_queue.pop_front() {
+            let name = stringify_set(&front);
+            let state_map = transitions
+                .entry(name.to_string())
+                .or_insert(HashMap::new());
+            if state_map.is_empty() {
+                states_set.insert(name.to_string());
+                if nfa.accept_states.intersection(&front).next().is_some() {
+                    final_states.insert(name.to_string());
+                }
+                state_map.extend(nfa.alphabet.iter().map(|symbol| {
+                    (*symbol, {
+                        let mut output = nfa.move_set(&front, *symbol);
+                        if output.is_empty() {
+                            used_sink_state = true;
+                            output = sink_state_set.clone();
+                        }
+
+                        let set_name = stringify_set(&output);
+                        states_set.insert(stringify_set(&output));
+
+                        if !output.is_empty() {
+                            states_queue.push_back(output);
+                        }
+                        HashSet::from([set_name])
+                    })
+                }));
+            }
+        }
+
+        nfa.states.clear();
+        nfa.states.extend(states_set.into_iter());
+
+        nfa.transition_function.clear();
+        nfa.transition_function.extend(transitions.into_iter());
+
+        nfa.start_state.clear();
+        nfa.start_state.push_str(&stringify_set(&start_state_set));
+
+        nfa.accept_states.clear();
+        nfa.accept_states.extend(final_states.into_iter());
+
+        if used_sink_state {
+            let sink_state_set_name = stringify_set(&sink_state_set);
+            nfa.states.insert(sink_state_set_name.to_string());
+            nfa.transition_function
+                .entry(sink_state_set_name.to_string())
+                .or_insert(HashMap::new())
+                .extend(
+                    nfa.alphabet
+                        .iter()
+                        .map(|symbol| (*symbol, sink_state_set.clone())),
+                );
+        }
+
+        nfa
     }
 }
