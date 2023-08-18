@@ -1,6 +1,7 @@
 #![allow(unused)]
 #![allow(dead_code)]
 
+use crate::generators::regexp::ExpressionBase;
 use std::collections::HashSet;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -27,7 +28,7 @@ pub struct Token {
 
 pub struct Scanner {
     chars: Vec<char>,
-    pub alphabet: HashSet<char>,
+    pub alphabet: HashSet<AlphabetSymbol>,
     empty_string_found: bool,
     current: usize,
 }
@@ -78,7 +79,7 @@ impl Iterator for Scanner {
                 || (prev == '(' && (peek == '|' || peek == ')'))
                 || (prev == '|' && (peek == '|' || peek == ')' || peek == '\0'))
             {
-                self.alphabet.insert('\0');
+                self.alphabet.insert(AlphabetSymbol::EmptyString);
                 next = Some(Token {
                     name: TokenName::EmptyString,
                     lexeme: '\0',
@@ -128,7 +129,7 @@ impl Iterator for Scanner {
                     // EscapedPipe,        \|
 
                     let next_char = *self.chars.get(self.current + 1).unwrap_or(&'\0');
-                    self.alphabet.insert(next_char);
+                    self.alphabet.insert(AlphabetSymbol::Character(next_char));
                     if next_char == '\\' {
                         next = Some(Token {
                             name: TokenName::EscapedSlash,
@@ -186,7 +187,7 @@ impl Iterator for Scanner {
                     self.current += 1;
                 }
                 c => {
-                    self.alphabet.insert(c);
+                    self.alphabet.insert(AlphabetSymbol::Character(c));
                     next = Some(Token {
                         name: TokenName::Symbol,
                         lexeme: c,
@@ -202,53 +203,7 @@ impl Iterator for Scanner {
     }
 }
 
-#[derive(Debug)]
-pub enum ExpressionBase {
-    EmptyString,
-    Symbol { value: char },
-    Grouping { inner_expr: Rc<ExpressionBase> },
-    Star { inner_expr: Rc<ExpressionBase> },
-    Union { items: Vec<Rc<ExpressionBase>> },
-    Concat { items: Vec<Rc<ExpressionBase>> },
-}
-
-impl From<&ExpressionBase> for String {
-    fn from(value: &ExpressionBase) -> Self {
-        match value {
-            ExpressionBase::EmptyString => String::new(),
-            ExpressionBase::Symbol { value, .. } => String::from(*value),
-            ExpressionBase::Grouping { inner_expr, .. } => {
-                format!("({})", String::from(inner_expr.as_ref()))
-            }
-            ExpressionBase::Star { inner_expr, .. } => {
-                let inner_expr = inner_expr.as_ref();
-                match inner_expr {
-                    ExpressionBase::Symbol { value } => {
-                        format!("{value}*")
-                    }
-                    _ => {
-                        format!("({})*", String::from(inner_expr))
-                    }
-                }
-            }
-            ExpressionBase::Union { items, .. } => items
-                .iter()
-                .map(|item| String::from(item.as_ref()))
-                .collect::<Vec<String>>()
-                .join("|"),
-            ExpressionBase::Concat { items, .. } => items.iter().fold(String::new(), |a, b| {
-                format!("{}{}", a, String::from(b.as_ref()))
-            }),
-        }
-    }
-}
-
-impl std::fmt::Display for &ExpressionBase {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", String::from(*self))
-    }
-}
-
+use crate::automata::nfa::AlphabetSymbol;
 use crate::automata::nfa::NFA;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -261,57 +216,52 @@ impl ExpressionBase {
         format!("{}", self)
     }
 
-    pub fn compile(&self, alphabet: &HashSet<char>) -> NFA {
-        let id = format!("{:?}", self as *const ExpressionBase);
-        let self_string = self.formatted();
-
-        let start_state = unsafe {
-            let temp = COUNTER;
+    pub fn compile(&self, alphabet: &HashSet<AlphabetSymbol>) -> NFA {
+        let start_state =
+            unsafe { NFA::new_random_state(&format!("({COUNTER},<{}>.S)", self.formatted())) };
+        unsafe {
             COUNTER += 1;
-            format!("(#{temp}<{self_string}>@{id}).<START>")
-        };
+        }
         let mut states = HashSet::new();
         states.insert(String::from(&start_state));
 
-        let mut transition_function = HashMap::<String, HashMap<char, HashSet<String>>>::new();
+        let mut transition_function = HashMap::new();
         let mut accept_states = HashSet::new();
 
         match self {
             Self::EmptyString { .. } => {
                 accept_states.insert(String::from(&start_state));
             }
-            ExpressionBase::Symbol { value, .. } => {
+            Self::Symbol(value) => {
                 let accept_state = unsafe {
-                    let temp = COUNTER;
-                    COUNTER += 1;
-                    format!("(#{temp}<{self_string}>@{id}).<ACCEPT>")
+                    NFA::new_random_state(&format!("({COUNTER}, <{}>.A)", self.formatted()))
                 };
                 states.insert(String::from(&accept_state));
 
                 transition_function
                     .entry(String::from(&start_state))
                     .or_insert(HashMap::new())
-                    .entry(*value)
+                    .entry(*value.as_ref())
                     .or_insert(HashSet::new())
                     .insert(String::from(&accept_state));
 
                 accept_states.insert(String::from(&accept_state));
             }
-            Self::Grouping { inner_expr, .. } => {
-                return inner_expr.compile(alphabet);
+            Self::Grouping(grouped_expr) => {
+                return grouped_expr.compile(alphabet);
             }
-            ExpressionBase::Star { inner_expr, .. } => {
-                let expr_nfa = inner_expr.compile(alphabet);
+            Self::Star(starred_expr) => {
+                let expr_nfa = starred_expr.compile(alphabet);
                 return NFA::kleene_star(&expr_nfa, &start_state);
             }
-            Self::Union { items, .. } => {
+            Self::Union(items) => {
                 let automata = items
                     .iter()
                     .map(|expr| expr.compile(alphabet))
                     .collect::<Vec<NFA>>();
                 return NFA::union(automata.iter(), &start_state);
             }
-            Self::Concat { items, .. } => {
+            Self::Concat(items) => {
                 let automata = items
                     .iter()
                     .map(|expr| expr.compile(alphabet))
@@ -321,6 +271,7 @@ impl ExpressionBase {
 
                 return NFA::concatenate(&automata[..]);
             }
+            ExpressionBase::EmptySet => todo!(),
         }
 
         let alphabet = alphabet.clone();
@@ -353,7 +304,7 @@ impl From<&Expression> for String {
         let base = value.base.borrow();
         let base = base.as_ref().unwrap();
         let base = base.as_ref();
-        String::from(base)
+        format!("{base}")
     }
 }
 
@@ -371,15 +322,14 @@ impl std::fmt::Display for &Expression {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let base = self.base.borrow();
         let base = base.as_ref().unwrap();
-        let base = base.as_ref();
-        let base = String::from(base);
+        let base = format!("{base}");
 
         match self.parent.borrow().as_ref() {
             Some(parent) => {
                 let parent = parent.upgrade().unwrap();
                 let parent = parent.base.borrow();
-                let parent = parent.as_ref().unwrap().as_ref();
-                let parent = String::from(parent);
+                let parent = parent.as_ref().unwrap();
+                let parent = format!("{parent}");
                 write!(f, "({parent} <= {base})")
             }
             None => {
@@ -390,7 +340,7 @@ impl std::fmt::Display for &Expression {
 }
 
 impl Expression {
-    pub fn compile(&self, alphabet: &HashSet<char>) -> NFA {
+    pub fn compile(&self, alphabet: &HashSet<AlphabetSymbol>) -> NFA {
         self.base.borrow().as_ref().unwrap().compile(alphabet)
     }
 }
@@ -573,12 +523,12 @@ impl Parser {
         } else if concats.len() == 1 {
             Ok(concats.pop().unwrap())
         } else {
-            let union = ExpressionBase::Union {
-                items: concats
+            let union = ExpressionBase::Union(
+                concats
                     .iter()
                     .map(|expr| Rc::clone(expr.base.borrow().as_ref().unwrap()))
                     .collect::<_>(),
-            };
+            );
             let union = Rc::new(union);
 
             let returned_expression = {
@@ -625,12 +575,12 @@ impl Parser {
         } else if stars.len() <= 1 {
             Ok(stars.pop().unwrap())
         } else {
-            let concat = ExpressionBase::Concat {
-                items: stars
+            let concat = ExpressionBase::Concat(
+                stars
                     .iter()
                     .map(|expr| Rc::clone(expr.base.borrow().as_ref().unwrap()))
                     .collect::<_>(),
-            };
+            );
             let concat = Rc::new(concat);
 
             let returned_expression = {
@@ -676,9 +626,7 @@ impl Parser {
                     post_message,
                 });
             }
-            let star = ExpressionBase::Star {
-                inner_expr: Rc::clone(primary.base.borrow().as_ref().unwrap()),
-            };
+            let star = ExpressionBase::Star(Rc::clone(primary.base.borrow().as_ref().unwrap()));
             let star = Rc::new(star);
 
             let returned_expression = {
@@ -715,9 +663,9 @@ impl Parser {
                     self.consume(TokenName::RightParen, "Expected `)` after expression.")?;
                     self.groupings.borrow_mut().pop();
 
-                    let grouping = ExpressionBase::Grouping {
-                        inner_expr: Rc::clone(parsed_expr.base.borrow().as_ref().unwrap()),
-                    };
+                    let grouping = ExpressionBase::Grouping(Rc::clone(
+                        parsed_expr.base.borrow().as_ref().unwrap(),
+                    ));
                     let grouping = Rc::new(grouping);
 
                     let returned_expression = {
@@ -742,7 +690,8 @@ impl Parser {
                     // Single-symbol expression
                     self.advance();
                     let parent = RefCell::new(None);
-                    let symbol = ExpressionBase::Symbol { value: peek.lexeme };
+                    let symbol =
+                        ExpressionBase::Symbol(Rc::new(AlphabetSymbol::Character(peek.lexeme)));
                     let symbol = Rc::new(symbol);
                     let base = RefCell::new(Some(symbol));
                     let children = RefCell::new(Vec::new());

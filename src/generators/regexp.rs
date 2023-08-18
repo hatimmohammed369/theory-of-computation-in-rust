@@ -1,198 +1,189 @@
 mod compiler;
 
-use crate::automata::nfa::NFA;
+use crate::automata::nfa::{AlphabetSymbol, NFA};
 use crate::automata::ComputationResult;
 
 // Regular Expressions module.
 
-/*
-Add parenthesis to (expr) when needed, that's when:
-1 - (expr) is in form A|B|C|...
-2 - in (expr) first occurence of ( does not matche last )
- */
-pub fn parenthesize(expr: &mut String) -> &mut String {
-    if expr.len() == 1
-        && (expr == "|"
-            || expr == "\\"
-            || expr == "("
-            || expr == ")"
-            || expr == "*"
-            || expr == "["
-            || expr == "]"
-            || expr == ".")
-    {
-        /*
-        Treat those characters specially such that return value
-        can be use as input to (regexp) module.
-         */
-        expr.insert(0, '\\');
-        return expr;
-    }
-
-    let mut stars = 0u32;
-    while expr.ends_with('*') {
-        expr.pop();
-        stars += 1;
-    }
-
-    let mut nesting = 0u128;
-    for (idx, ch) in expr.char_indices() {
-        if ch == '(' {
-            nesting += 1
-        } else if ch == ')' {
-            nesting -= 1
-        }
-
-        if nesting == 0 && (idx != expr.len() - 1 || ch == '|') {
-            if stars > 0 {
-                for _ in 1..=stars {
-                    expr.push('*')
-                }
-                stars = 0;
-            }
-            expr.insert(0, '(');
-            expr.push(')');
-            break;
-        }
-    }
-    if stars > 0 {
-        for _ in 1..=stars {
-            expr.push('*')
-        }
-    }
-    expr
+#[derive(Debug)]
+pub enum ExpressionBase {
+    EmptySet,
+    EmptyString,
+    Symbol(Rc<AlphabetSymbol>), // AlphabetSymbol CAN NOT be the EmptyString variant.
+    Grouping(Rc<ExpressionBase>),
+    Star(Rc<ExpressionBase>),
+    Union(Vec<Rc<ExpressionBase>>),
+    Concat(Vec<Rc<ExpressionBase>>),
 }
 
-// Option::None REPRESENTS THE PHI REGULAR EXPRESSION, THE EMPTY LANGUAGE
+impl Display for ExpressionBase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                ExpressionBase::EmptySet => "{}".to_string(),
+                ExpressionBase::EmptyString => "".to_string(),
+                ExpressionBase::Symbol(value) => format!("{}", value.as_ref()),
+                ExpressionBase::Grouping(grouped_expr) => format!("({})", grouped_expr.as_ref()),
+                ExpressionBase::Star(starred_expr) => {
+                    match starred_expr.as_ref() {
+                        ExpressionBase::Symbol(value) => format!("{value}*"),
+                        _ => format!("({starred_expr})*"),
+                    }
+                }
+                ExpressionBase::Union(items) => {
+                    let mut exprs = items.iter().map(|e| format!("{e}"));
+                    let first = exprs.next().unwrap();
+                    exprs.fold(first, |current, next| format!("{current}|{next}"))
+                }
+                ExpressionBase::Concat(items) => {
+                    let mut exprs = items.iter().map(|e| {
+                        // Parenthesize union expressions to perserve their (lower) precedence
+                        match e.as_ref() {
+                            ExpressionBase::Union(_) => format!("({e})"),
+                            _ => format!("{e}"),
+                        }
+                    });
+                    let first = exprs.next().unwrap();
+                    exprs.fold(first, |current, next| format!("{current}{next}"))
+                }
+            }
+        )
+    }
+}
 
 // Compute the kleene star of a regular expression
-pub fn star_string_regex(expr: &Option<&str>) -> String {
-    if expr.is_none() {
-        /*
-        Starring the empty language yields the empty string
-        thus return an empty string.
-        */
-        return String::new();
-    }
-
-    let mut expr = expr.unwrap().to_string();
-    parenthesize(&mut expr);
-    expr
+pub fn star_string_regex(expr: &Rc<ExpressionBase>) -> Rc<ExpressionBase> {
+    Rc::new(match expr.as_ref() {
+        ExpressionBase::EmptySet => ExpressionBase::EmptyString,
+        _ => ExpressionBase::Star(Rc::clone(expr)),
+    })
 }
 
 // Compute the union of a group of regular expressions
-pub fn union_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
-    let mut union_expr = String::new();
+pub fn union_string_regexes(exprs: &[Rc<ExpressionBase>]) -> Rc<ExpressionBase> {
+    let mut exprs_vec = Vec::<Rc<ExpressionBase>>::new();
 
-    /*
-    All expressions are Option::None, equivalently, all are the phi regular expression
-    and thus we are computing the union of empty sets which just yields the empty set.
-    */
-    let mut all_none = true;
-
-    /*
-    All expressions are Option::Some(""), equivalently, all are the empty string
-    and thus we are computing the union of empty string which just yields the empty string.
-    */
+    let mut all_phi = true;
     let mut all_empty = true;
+    let mut empty_string = None;
+    for expr_rc in exprs {
+        let expr = expr_rc.as_ref();
 
-    for expr in exprs {
-        if expr.is_none() {
-            /*
-            Union with Option::None (aka phi regular expression) is like adding 0
-            Its has no effect, so just continue to the next iteration.
-            */
-            continue;
+        if all_phi && !matches!(expr, ExpressionBase::EmptySet) {
+            // Some thing is not phi.
+            all_phi = false;
+        }
+        if all_empty {
+            match expr {
+                ExpressionBase::EmptyString => {}
+                ExpressionBase::Symbol(value) => {
+                    // Handle symbols
+                    match value.as_ref() {
+                        AlphabetSymbol::EmptyString => {}
+                        _ => all_empty = false,
+                    }
+                }
+                _ => all_empty = false,
+            }
         }
 
-        // Now we know at least one expression is not phi.
-        all_none = false;
-
-        let mut expr = expr.as_ref().unwrap().to_string();
-        if !expr.is_empty() {
-            // Now we know at one expression is not the empty string.
-            all_empty = false;
+        match expr {
+            ExpressionBase::EmptySet => {} // Unioning the empty set has no effect.
+            ExpressionBase::Symbol(value) => {
+                // Extract AlphabetSymbol if it is not AlphabetSymbol::EmptyString or use ExpressionBase::EmptyString
+                match value.as_ref() {
+                    AlphabetSymbol::Any => {
+                        return Rc::clone(expr_rc);
+                    }
+                    AlphabetSymbol::EmptyString => {
+                        empty_string = Some(Rc::new(ExpressionBase::EmptyString));
+                    }
+                    AlphabetSymbol::Character(_) => {
+                        exprs_vec.push(Rc::clone(expr_rc));
+                    }
+                }
+            }
+            _ => {
+                if !matches!(expr, ExpressionBase::EmptyString) {
+                    /*
+                    When the vector is non-empty, check for the last inserted expression
+                    if the last is empty string and current one is also, do not insert current
+                    */
+                    exprs_vec.push(Rc::clone(expr_rc));
+                } else {
+                    empty_string = Some(Rc::clone(expr_rc));
+                }
+            }
         }
-
-        if expr.len() >= 2 && &expr[expr.len() - 2..] == "||" && expr.is_empty() {
-            /*
-            The last expression we unioned was the empty string, and current one is also the empty string
-            do not append another union operator `|` so that the output is little pretty
-            Otherwise if we could end up with return value `a|||||||`
-            which is not really nice to look at!.
-            */
-            continue;
-        }
-
-        parenthesize(&mut expr);
-        expr.push('|');
-
-        union_expr.push_str(&expr);
     }
 
-    if all_none {
-        // All expressions are phi, just return phi (None)
-        return None;
-    } else if all_empty {
-        // All expressions are empty, just return the empty string
-        return Some(String::new());
-    } else if !union_expr.is_empty() {
-        /*
-        In each iteration of the above loop, we append the expression followed by `|`
-        thus the last expression will append a redundant `|` which must be removed
-        otherwise this redundant `|` will imply this expression unions the empty string
-         */
-        union_expr.pop();
+    if let Some(e) = empty_string {
+        exprs_vec.push(e);
     }
 
-    Some(union_expr)
+    if exprs_vec.len() == 1 {
+        return exprs_vec.pop().unwrap();
+    }
+
+    Rc::new({
+        if all_phi {
+            ExpressionBase::EmptySet
+        } else if all_empty {
+            ExpressionBase::EmptyString
+        } else if exprs_vec.is_empty() {
+            // Union of nothing
+            ExpressionBase::EmptySet
+        } else {
+            ExpressionBase::Union(exprs_vec)
+        }
+    })
 }
 
 // Compute the concatenation of a group of regular expressions
-pub fn concat_string_regexes(exprs: &[Option<&str>]) -> Option<String> {
-    /*
-    All expressions are Option::Some(""), equivalently, all are the empty string
-    and thus we are computing the union of empty string which just yields the empty string.
-    */
+pub fn concat_string_regexes(exprs: &[Rc<ExpressionBase>]) -> Rc<ExpressionBase> {
+    let mut exprs_vec = Vec::<Rc<ExpressionBase>>::new();
     let mut all_empty = true;
 
-    let mut concat_expr = String::new();
+    for expr_rc in exprs {
+        let expr = expr_rc.as_ref();
 
-    for expr in exprs {
-        if expr.is_none() {
-            /*
-            If one expression is phi (the empty language)
-            the the whole concatination of the input is the empty language
-            because concatination the empty language yields the empty langauge
-            Like multiply by zero.
-            */
-            return None;
+        if all_empty && !matches!(expr, ExpressionBase::EmptyString) {
+            // Some thing is not the empty string.
+            all_empty = false;
         }
 
-        let mut expr = expr.as_ref().unwrap().to_string();
-        if expr.is_empty() {
-            /*
-            Contination with the empty string has no effect
-            Like multiplying by one or adding zero
-            */
-            continue;
+        match expr {
+            ExpressionBase::EmptySet => {
+                // Concatenting the empty set yields the empty set only.
+                return Rc::clone(expr_rc);
+            }
+            ExpressionBase::EmptyString => {} // Concatentating the empty string has no effect.
+            ExpressionBase::Symbol(value) => {
+                // Extract AlphabetSymbol if it is not AlphabetSymbol::EmptyString, or use ExpressionBase::EmptyString
+                match value.as_ref() {
+                    AlphabetSymbol::EmptyString => {} // Concatenating the empty string (symbol) has no effect.
+                    _ => exprs_vec.push(Rc::clone(expr_rc)),
+                }
+            }
+            _ => exprs_vec.push(Rc::clone(expr_rc)),
         }
-        // Now we know at one expression is not the empty string.
-        all_empty = false;
-
-        parenthesize(&mut expr);
-        concat_expr.push_str(&expr);
     }
 
-    if all_empty {
-        /*
-        Concatinating a group of empty strings,
-        the final expression is just the empty string
-        */
-        return Some(String::new());
+    if exprs_vec.len() == 1 {
+        return exprs_vec.pop().unwrap();
     }
 
-    Some(concat_expr)
+    Rc::new({
+        if all_empty {
+            ExpressionBase::EmptyString
+        } else if exprs_vec.is_empty() {
+            ExpressionBase::EmptySet
+        } else {
+            ExpressionBase::Concat(exprs_vec)
+        }
+    })
 }
 
 use crate::generators::regexp::compiler::{Parser, Scanner};
@@ -204,6 +195,7 @@ pub struct Regexp<'a> {
 
 use crate::generators::regexp::compiler::Expression;
 use std::collections::LinkedList;
+use std::fmt::Display;
 use std::rc::Rc;
 
 fn debug_expression(root: &Rc<Expression>) {
