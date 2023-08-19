@@ -12,6 +12,7 @@ pub enum TokenName {
     LeftParen,
     Star,
     Pipe,
+    Dot,
     EscapedSlash,      // \\
     EscapedRightParen, // \(
     EscapedLeftParen,  // \)
@@ -118,6 +119,14 @@ impl Iterator for Scanner {
                     next = Some(Token {
                         name: TokenName::Pipe,
                         lexeme: '|',
+                        position: self.current,
+                    });
+                }
+                '.' => {
+                    self.alphabet.insert(AlphabetSymbol::Any);
+                    next = Some(Token {
+                        name: TokenName::Dot,
+                        lexeme: '.',
                         position: self.current,
                     });
                 }
@@ -234,7 +243,7 @@ impl ExpressionBase {
             }
             Self::Symbol(value) => {
                 let accept_state = unsafe {
-                    NFA::new_random_state(&format!("({COUNTER}, <{}>.A)", self.formatted()))
+                    NFA::new_random_state(&format!("({COUNTER},<{}>.A)", self.formatted()))
                 };
                 states.insert(String::from(&accept_state));
 
@@ -330,7 +339,7 @@ impl std::fmt::Display for &Expression {
                 let parent = parent.base.borrow();
                 let parent = parent.as_ref().unwrap();
                 let parent = format!("{parent}");
-                write!(f, "({parent} <= {base})")
+                write!(f, "({base} => {parent})")
             }
             None => {
                 write!(f, "{base}")
@@ -462,7 +471,7 @@ impl Parser {
     Union => Concat ( '|' Concat )? ( '|' Concat )*
     Concat => Star Star*
     Star => Primary ( '*' )?
-    Primary => EMPTY_STRING | SYMBOL | '(' Expression ')'
+    Primary => EMPTY_STRING | DOT | SYMBOL | '(' Expression ')'
      */
     pub fn parse(&self) -> Result<Rc<Expression>, String> {
         self.advance();
@@ -686,12 +695,21 @@ impl Parser {
                     returned_expression.children.borrow_mut().push(parsed_expr);
 
                     Ok(returned_expression)
-                } else if peek.name == TokenName::Symbol || Self::is_escaped_token(&peek) {
+                } else if peek.name == TokenName::Dot
+                    || peek.name == TokenName::Symbol
+                    || Self::is_escaped_token(&peek)
+                {
                     // Single-symbol expression
                     self.advance();
                     let parent = RefCell::new(None);
-                    let symbol =
-                        ExpressionBase::Symbol(Rc::new(AlphabetSymbol::Character(peek.lexeme)));
+                    let symbol = ExpressionBase::Symbol(Rc::new({
+                        // Choose symbol
+                        if peek.name == TokenName::Dot {
+                            AlphabetSymbol::Any
+                        } else {
+                            AlphabetSymbol::Character(peek.lexeme)
+                        }
+                    }));
                     let symbol = Rc::new(symbol);
                     let base = RefCell::new(Some(symbol));
                     let children = RefCell::new(Vec::new());

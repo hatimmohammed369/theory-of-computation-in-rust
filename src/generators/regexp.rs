@@ -188,6 +188,7 @@ pub fn concat_string_regexes(exprs: &[Rc<ExpressionBase>]) -> Rc<ExpressionBase>
 
 use crate::generators::regexp::compiler::{Parser, Scanner};
 
+#[derive(Debug)]
 pub struct Regexp<'a> {
     pattern: &'a str,
     matcher: NFA,

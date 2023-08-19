@@ -108,7 +108,10 @@ impl NFA {
         infer_type: bool, // Infer the type of the new automaton based on parameter values.
         is_deterministic: bool, // when paramter infer_type is false, just use this value in (is_deterministic) parameter.
     ) -> NFA {
-        let mut states_set = states.iter().map(|x| x.to_string()).collect::<HashSet<_>>();
+        let mut states_set = states
+            .iter()
+            .map(ToString::to_string)
+            .collect::<HashSet<_>>();
         let mut alphabet_set = alphabet.iter().copied().collect::<HashSet<_>>();
 
         if !states.contains(&start_state) {
@@ -223,7 +226,7 @@ impl NFA {
             alphabet: alphabet_set,
             transition_function: function,
             start_state: start_state.to_string(),
-            accept_states: accept_states.iter().map(|x| x.to_string()).collect(),
+            accept_states: accept_states.iter().map(ToString::to_string).collect(),
             is_deterministic: is_deterministic_flag,
             dfa: RefCell::new(None),
         }
@@ -430,7 +433,8 @@ impl NFA {
             if log {
                 eprintln!("{automaton_states:?} reading {next_symbol}");
             }
-            if !self.alphabet.contains(next_symbol) {
+            if !self.alphabet.contains(next_symbol) && !self.alphabet.contains(&AlphabetSymbol::Any)
+            {
                 return Err(format!(
                     "Warning from [NFA::compute]: Symbol `{next_symbol}` is not in alphabet {:?}",
                     self.alphabet
