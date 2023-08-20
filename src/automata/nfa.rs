@@ -544,9 +544,18 @@ impl NFA {
             s
         };
 
+        // States possessing transitions labeled with AlphabetSymbol::Any.
+        let sigma_transitions_states = nfa
+            .transition_function
+            .iter()
+            .filter(|(state, map)| map.contains_key(&AlphabetSymbol::Any))
+            .map(|(state, _)| state.to_string())
+            .collect::<HashSet<_>>();
+
         let mut states = HashSet::new();
         let mut alphabet = nfa.alphabet.clone();
         alphabet.remove(&AlphabetSymbol::EmptyString);
+        alphabet.remove(&AlphabetSymbol::Any);
         let mut transition_function = HashMap::new();
 
         let start_state = nfa.epsilon_closure(&HashSet::from([nfa.start_state.to_string()]));
@@ -565,23 +574,84 @@ impl NFA {
                 .or_insert(HashMap::new());
             if set_symbols_map.is_empty() {
                 states.insert(name.to_string());
+
                 if new_set.intersection(&nfa.accept_states).next().is_some() {
                     accept_states.insert(name.to_string());
                 }
-                for symbol in &alphabet {
-                    let moved_new_set = {
-                        let x = nfa.move_set(&new_set, symbol);
-                        if x.is_empty() {
-                            used_sink_state = true;
-                            sink_state.clone()
-                        } else {
-                            x
+
+                if new_set
+                    .intersection(&sigma_transitions_states)
+                    .next()
+                    .is_some()
+                {
+                    /*
+                    This (new_set) contains at least one state possessing a AlphabetSymbol::Any transition
+                    in this case the only transition for this (new_set) will be AlphabetSymbol::Any
+                    in other words, state map of (new_set) will have a single entry whose key is AlphabetSymbol::Any
+                    and whose value is the set of (S) all states reachable from (q) when reading any symbol (or the empty string)
+                    for each state (q) in (new_set), also we make S = epsilon closure of S
+                    Of course if set (S) is empty we use the sink state set
+                    */
+
+                    // The set (S) defined above.
+                    let mut sigma_transition_set = HashSet::new();
+                    for q in new_set {
+                        if let Some(state_q_map) = nfa.transition_function.get(&q) {
+                            for symbol_set in state_q_map.values() {
+                                sigma_transition_set
+                                    .extend(symbol_set.iter().map(ToString::to_string));
+                            }
                         }
-                    };
-                    set_symbols_map.insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
-                    new_sets.push_back(moved_new_set);
+                    }
+
+                    if sigma_transition_set.is_empty() {
+                        used_sink_state = true;
+                        sigma_transition_set = sink_state.clone();
+                    } else {
+                        // Take epsilon closure
+                        sigma_transition_set = nfa.epsilon_closure(&sigma_transition_set);
+                    }
+
+                    set_symbols_map.insert(
+                        AlphabetSymbol::Any,
+                        HashSet::from([stringify_set(&sigma_transition_set)]),
+                    );
+
+                    // Do not add the sink state set to the queue
+                    if !used_sink_state {
+                        new_sets.push_back(sigma_transition_set);
+                    }
+                } else {
+                    // No state in (new_set) has AlphabetSymbol::Any transition.
+                    for symbol in &alphabet {
+                        let moved_new_set = {
+                            let x = nfa.move_set(&new_set, symbol);
+                            if x.is_empty() {
+                                used_sink_state = true;
+                                sink_state.clone()
+                            } else {
+                                x
+                            }
+                        };
+
+                        set_symbols_map
+                            .insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
+
+                        // Do not add the sink state set to the queue
+                        if !used_sink_state {
+                            new_sets.push_back(moved_new_set);
+                        }
+                    }
                 }
             }
+        }
+
+        if !sigma_transitions_states.is_empty() {
+            /*
+            Some states in the DFA transition function use AlphabetSymbol::Any
+            included AlphabetSymbol::Any in the DFA alphabet
+            */
+            alphabet.insert(AlphabetSymbol::Any);
         }
 
         if used_sink_state {
@@ -615,6 +685,7 @@ impl NFA {
 
         let NFA {
             states,
+            alphabet,
             transition_function,
             start_state,
             accept_states,
@@ -623,14 +694,22 @@ impl NFA {
 
         self.states.clear();
         self.states.extend(states.into_iter());
+
+        if alphabet.contains(&AlphabetSymbol::Any) {
+            self.alphabet.insert(AlphabetSymbol::Any);
+        }
         self.alphabet.remove(&AlphabetSymbol::EmptyString);
+
         self.transition_function.clear();
         self.transition_function
             .extend(transition_function.into_iter());
+
         self.start_state.clear();
         self.start_state.push_str(&start_state);
+
         self.accept_states.clear();
         self.accept_states.extend(accept_states.into_iter());
+
         self.is_deterministic = true;
 
         self
