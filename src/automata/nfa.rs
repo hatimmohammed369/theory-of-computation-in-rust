@@ -122,14 +122,14 @@ impl NFA {
         states_set.insert(start_state.to_string()); // Do not forget adjoining the start state.
 
         // Issue warnings for each accepting state not in parameter `states`.
-        accept_states.iter().for_each(|x| {
+        for x in accept_states {
             if !states.contains(x) {
                 eprintln!(
                     "Warning from [NFA::new]: Accept State `{x}` is not in the states array\n"
                 );
             }
             states_set.insert(x.to_string());
-        });
+        }
 
         // The final transition function of the new object.
         let mut function = HashMap::new();
@@ -176,7 +176,7 @@ impl NFA {
                 .or_insert(HashMap::new())
                 .entry(symbol)
                 .or_insert(HashSet::new());
-            items.iter().for_each(|x| {
+            for x in items {
                 states_set.insert(x.to_string());
                 destination.insert(x.to_string());
 
@@ -184,7 +184,7 @@ impl NFA {
                     eprintln!("Warning from [NFA::new]: State `{x}` is not in the states array\n");
                     eprintln!("Found in transition {item:?}\n");
                 }
-            });
+            }
         }
 
         if infer_type && computed_is_deterministic_flag {
@@ -212,6 +212,12 @@ impl NFA {
                         break;
                     }
                 }
+            } else {
+                /*
+                Some states do not have any outgoing transitions
+                hence, this automaton is strictly non-deterministic.
+                */
+                computed_is_deterministic_flag = false;
             }
         }
 
@@ -369,11 +375,11 @@ impl NFA {
             if let Some(empty_string_set) =
                 self.read_symbol_states_set(&elem, &AlphabetSymbol::EmptyString)
             {
-                empty_string_set.iter().for_each(|s| {
+                for s in empty_string_set {
                     if out.insert(s.to_string()) {
                         new_items.push_back(s.to_string());
                     }
-                });
+                }
             }
         }
 
@@ -387,7 +393,7 @@ impl NFA {
     fn move_set(&self, set: &HashSet<String>, symbol: &AlphabetSymbol) -> HashSet<String> {
         let mut out = HashSet::new();
 
-        set.iter().for_each(|q| {
+        for q in set {
             out.extend(
                 self.read_symbol_states_set(q, symbol)
                     .unwrap_or(&HashSet::new())
@@ -405,7 +411,7 @@ impl NFA {
                     .iter()
                     .map(ToString::to_string),
             )
-        });
+        }
 
         self.epsilon_closure(&out)
     }
@@ -933,7 +939,7 @@ impl NFA {
             Add all states of the currenly processed automaton but with their names
             styled by closure (style) defined above this loop header
              */
-            automaton.states.iter().for_each(|s| {
+            for s in &automaton.states {
                 // style state name
                 let name = style(s, counter);
 
@@ -963,7 +969,7 @@ impl NFA {
                     // Adjoin the (state symbols map) of currently processed state.
                     transition_function.insert(name, adjusted_state_map);
                 }
-            });
+            }
 
             /*
             Add all accepting states of the current automaton
@@ -1016,7 +1022,7 @@ impl NFA {
             Add all states of the currenly processed automaton but with their names
             styled by closure (style) defined above this loop header
              */
-            automaton.states.iter().for_each(|s| {
+            for s in &automaton.states {
                 // style state name
                 let name = style(s, counter);
 
@@ -1046,7 +1052,7 @@ impl NFA {
                     // Adjoin the (state symbols map) of currently processed state.
                     transition_function.insert(name, adjusted_state_map);
                 }
-            });
+            }
 
             if counter + 1 < automata.len() {
                 /*
