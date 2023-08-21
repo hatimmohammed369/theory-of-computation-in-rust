@@ -357,6 +357,39 @@ impl NFA {
         self.is_deterministic
     }
 
+    pub fn infer_type(&mut self) -> &mut Self {
+        if self.transition_function.len() < self.states.len() {
+            // Some states do not have outgoing transitions.
+            self.is_deterministic = false;
+        } else {
+            /*
+            We can't have self.transition_function.len() > self.states.len()
+            because whenever and entry is inserted to transtion_function, we add that entry's key in self.states
+            Thus here we have self.transition_function.len() == self.states.len()
+             */
+            let mut true_alphabet = self.alphabet.len();
+            if self.alphabet.contains(&AlphabetSymbol::Any) {
+                true_alphabet -= 1;
+            }
+            if self.alphabet.contains(&AlphabetSymbol::EmptyString) {
+                true_alphabet -= 1;
+            }
+
+            for state_map in self.transition_function.values() {
+                let mut true_keys = state_map.keys().collect::<HashSet<_>>();
+                true_keys.remove(&AlphabetSymbol::Any);
+                true_keys.remove(&AlphabetSymbol::EmptyString);
+                let true_keys = true_keys.len();
+                if true_keys < true_alphabet {
+                    // Some state does not have outgoing transitions from some alphabet symbols
+                    self.is_deterministic = false;
+                    break;
+                }
+            }
+        }
+        self
+    }
+
     /*
     Return all states reachable from parameter (set) using
     any number of empty string transitions
