@@ -1507,11 +1507,11 @@ impl NFA {
             return Err(error);
         }
 
-        let not_dfa1 = Self::compute_complement(&dfa1);
-        let not_dfa2 = Self::compute_complement(&dfa1);
+        let not_dfa1 = Self::compute_complement(dfa1);
+        let not_dfa2 = Self::compute_complement(dfa1);
 
-        let one_not_two = Self::intersection(&[&dfa1, &not_dfa2]);
-        let two_not_one = Self::intersection(&[&not_dfa1, &dfa2]);
+        let one_not_two = Self::intersection(&[dfa1, &not_dfa2]);
+        let two_not_one = Self::intersection(&[&not_dfa1, dfa2]);
 
         Ok(NFA::union([one_not_two, two_not_one].iter(), "<U>"))
     }

@@ -191,7 +191,7 @@ use crate::generators::regexp::compiler::{Parser, Scanner};
 #[derive(Debug)]
 pub struct Regexp<'a> {
     pattern: &'a str,
-    matcher: NFA,
+    compiled_pattern: NFA,
 }
 
 use crate::generators::regexp::compiler::Expression;
@@ -233,16 +233,21 @@ fn debug_expression(root: &Rc<Expression>) {
 }
 
 impl<'a> Regexp<'a> {
-    pub fn new(pattern: &'a str) -> Result<Regexp, String> {
+    pub fn new(pattern: &'a str, debug: bool) -> Result<Regexp, String> {
         let scanner = Scanner::new(pattern);
         let parser = Parser::new(scanner);
         let parsed_expression = parser.parse();
         match parsed_expression {
             Ok(expr) => {
-                debug_expression(&expr);
+                if debug {
+                    debug_expression(&expr);
+                }
 
-                let matcher = expr.compile(&parser.scanner.borrow().alphabet);
-                Ok(Regexp { pattern, matcher })
+                let compiled_pattern = expr.compile(&parser.scanner.borrow().alphabet);
+                Ok(Regexp {
+                    pattern,
+                    compiled_pattern,
+                })
             }
             Err(error) => Err(error),
         }
@@ -252,8 +257,12 @@ impl<'a> Regexp<'a> {
         self.pattern
     }
 
+    pub fn read_automaton(&self) -> &NFA {
+        &self.compiled_pattern
+    }
+
     pub fn fullmatch(&self, input: &str) -> bool {
-        match self.matcher.compute(input, false) {
+        match self.compiled_pattern.compute(input, false) {
             Ok(result) => result == ComputationResult::Accept,
             Err(_) => false,
         }
