@@ -376,14 +376,17 @@ impl NFA {
             }
 
             for state_map in self.transition_function.values() {
-                let mut true_keys = state_map.keys().collect::<HashSet<_>>();
-                true_keys.remove(&AlphabetSymbol::Any);
-                true_keys.remove(&AlphabetSymbol::EmptyString);
-                let true_keys = true_keys.len();
-                if true_keys < true_alphabet {
-                    // Some state does not have outgoing transitions from some alphabet symbols
+                if state_map.contains_key(&AlphabetSymbol::EmptyString) {
+                    // Empty string transition
                     self.is_deterministic = false;
                     break;
+                } else if !state_map.contains_key(&AlphabetSymbol::Any) {
+                    let true_keys = state_map.keys().count();
+                    if true_keys < true_alphabet {
+                        // Some state does not have outgoing transitions from some alphabet symbols
+                        self.is_deterministic = false;
+                        break;
+                    }
                 }
             }
         }
