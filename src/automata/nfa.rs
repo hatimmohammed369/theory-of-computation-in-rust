@@ -509,9 +509,10 @@ impl NFA {
         }
 
         if log {
-            eprintln!("{result:?}ed input `{input}`\n");
+            eprintln!("{result:?}ed input `{input}`");
 
             if result == ComputationResult::Accept {
+                eprintln!();
                 eprintln!(
                     "Reached accepting states:\n{:?}",
                     automaton_states
@@ -1339,15 +1340,17 @@ impl NFA {
                 .collect::<Vec<_>>()
         };
 
-        let the_dead_state = Self::new_random_state("<INTERSECTION-SINK>");
-        let dead_state_set = HashSet::from([the_dead_state.to_string()]);
-        let mut used_dead_state = false;
+        let sink_state = Self::new_random_state("<INTERSECTION-SINK>");
+        let sink_state_set = HashSet::from([sink_state.to_string()]);
+        let mut used_sink_state = false;
 
-        let alphabet = {
+        let mut alphabet = {
             let mut alphabet = HashSet::new();
             for nfa in automata {
                 alphabet.extend(nfa.alphabet.iter().copied());
             }
+            alphabet.remove(&AlphabetSymbol::Any);
+            alphabet.remove(&AlphabetSymbol::EmptyString);
             alphabet
         };
 
@@ -1357,6 +1360,7 @@ impl NFA {
                 let state_map = transition_function
                     .entry(name.to_string())
                     .or_insert(HashMap::new());
+                let mut all_go_to_sink_state = true;
                 for symbol in &alphabet {
                     /*
                     HashSet at position (i) is states reachable from state[i] in automata[i] when reading (symbol)
@@ -1372,9 +1376,10 @@ impl NFA {
                     let outputs = &outputs[..];
                     let outputs = product(outputs);
                     if outputs.is_empty() {
-                        state_map.insert(*symbol, dead_state_set.clone());
-                        used_dead_state = true;
+                        state_map.insert(*symbol, sink_state_set.clone());
+                        used_sink_state = true;
                     } else {
+                        all_go_to_sink_state = false;
                         let outputs = outputs
                             .iter()
                             .map(|tuple| stringify_set(tuple))
@@ -1382,18 +1387,25 @@ impl NFA {
                         state_map.insert(*symbol, outputs);
                     }
                 }
+
+                if all_go_to_sink_state {
+                    state_map.clear();
+                    state_map.insert(AlphabetSymbol::Any, sink_state_set.clone());
+                }
             }
 
-            if used_dead_state {
-                let dead_state_name = the_dead_state.to_string();
+            if used_sink_state {
+                let sink_state_name = sink_state.to_string();
                 states.push((
-                    vec![dead_state_name.to_string()],
-                    dead_state_name.to_string(),
+                    vec![sink_state_name.to_string()],
+                    sink_state_name.to_string(),
                 ));
+                alphabet.insert(AlphabetSymbol::Any);
+
                 transition_function
-                    .entry(the_dead_state.to_string())
+                    .entry(sink_state.to_string())
                     .or_insert(HashMap::new())
-                    .insert(AlphabetSymbol::Any, dead_state_set);
+                    .insert(AlphabetSymbol::Any, sink_state_set);
             }
 
             transition_function
@@ -1481,5 +1493,32 @@ impl NFA {
         }
 
         nfa
+    }
+
+    pub fn symmetric_difference(dfa1: &NFA, dfa2: &NFA) -> Result<NFA, String> {
+        let mut error = String::new();
+        if !dfa1.is_deterministic {
+            error.push_str("[NFA::symmetric_difference]: First automaton is not deterministic!\n");
+        }
+        if !dfa2.is_deterministic {
+            error.push_str("[NFA::symmetric_difference]: Second automaton is not deterministic!\n");
+        }
+        if !error.is_empty() {
+            return Err(error);
+        }
+
+        let not_dfa1 = Self::compute_complement(&dfa1);
+        let not_dfa2 = Self::compute_complement(&dfa1);
+
+        let one_not_two = Self::intersection(&[&dfa1, &not_dfa2]);
+        let two_not_one = Self::intersection(&[&not_dfa1, &dfa2]);
+
+        Ok(NFA::union([one_not_two, two_not_one].iter(), "<U>"))
+    }
+
+    pub fn are_equivalent(dfa1: &NFA, dfa2: &NFA) -> Result<bool, String> {
+        Ok(Self::has_empty_language(&Self::symmetric_difference(
+            dfa1, dfa2,
+        )?))
     }
 }
