@@ -1456,7 +1456,7 @@ impl NFA {
                 // This states has no transitions.
                 used_sink_state = true;
                 state_map.insert(AlphabetSymbol::Any, sink_state_set.clone());
-            } else {
+            } else if !state_map.contains_key(&AlphabetSymbol::Any) {
                 for symbol in &alphabet {
                     let symbol_set = state_map.entry(*symbol).or_insert(HashSet::new());
                     if symbol_set.is_empty() {
