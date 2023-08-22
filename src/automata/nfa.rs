@@ -1335,42 +1335,95 @@ impl NFA {
         };
 
         let transition_function = {
+            let mut used_symbol_any = false;
             let mut transition_function = HashMap::new();
             for (state, name) in &states {
                 let state_map = transition_function
                     .entry(name.to_string())
                     .or_insert(HashMap::new());
-                let mut all_go_to_sink_state = true;
-                for symbol in &alphabet {
+                let some_state_uses_symbol_any = {
+                    let mut found = false;
+                    for (idx, q) in state.iter().enumerate() {
+                        if automata[idx]
+                            .transition_function
+                            .get(q)
+                            .unwrap_or(&HashMap::new())
+                            .contains_key(&AlphabetSymbol::Any)
+                        {
+                            found = true;
+                            break;
+                        }
+                    }
+                    found
+                };
+                if some_state_uses_symbol_any {
+                    // A state in this tuple (loop variable `state`) has an AlphabetSymbol::Any transition
+
                     /*
                     HashSet at position (i) is states reachable from state[i] in automata[i] when reading (symbol)
                      */
+                    used_symbol_any = true;
                     let outputs = state
                         .iter()
                         .enumerate()
                         .map(|(idx, elem_state)| {
-                            automata[idx].move_set(&HashSet::from([elem_state.to_string()]), symbol)
+                            automata[idx].move_set(
+                                &HashSet::from([elem_state.to_string()]),
+                                &AlphabetSymbol::Any,
+                            )
                         })
                         .collect::<Vec<_>>();
                     let outputs = outputs.iter().collect::<Vec<_>>();
                     let outputs = &outputs[..];
-                    let outputs = product(outputs);
-                    if outputs.is_empty() {
-                        state_map.insert(*symbol, sink_state_set.clone());
-                        used_sink_state = true;
-                    } else {
-                        all_go_to_sink_state = false;
-                        let outputs = outputs
+                    let outputs = {
+                        // Choose output set
+                        let p = product(outputs);
+                        if p.is_empty() {
+                            used_sink_state = true;
+                            sink_state_set.clone()
+                        } else {
+                            // strigify each tuple and pack all these strings in one HashSet
+                            p.iter()
+                                .map(|tuple| stringify_set(tuple))
+                                .collect::<HashSet<_>>()
+                        }
+                    };
+                    state_map.insert(AlphabetSymbol::Any, outputs);
+                } else {
+                    let mut all_go_to_sink_state = true;
+                    for symbol in &alphabet {
+                        /*
+                        HashSet at position (i) is states reachable from state[i] in automata[i] when reading (symbol)
+                         */
+                        let outputs = state
                             .iter()
-                            .map(|tuple| stringify_set(tuple))
-                            .collect::<HashSet<_>>();
-                        state_map.insert(*symbol, outputs);
+                            .enumerate()
+                            .map(|(idx, elem_state)| {
+                                automata[idx]
+                                    .move_set(&HashSet::from([elem_state.to_string()]), symbol)
+                            })
+                            .collect::<Vec<_>>();
+                        let outputs = outputs.iter().collect::<Vec<_>>();
+                        let outputs = &outputs[..];
+                        let outputs = product(outputs);
+                        if outputs.is_empty() {
+                            state_map.insert(*symbol, sink_state_set.clone());
+                            used_sink_state = true;
+                        } else {
+                            all_go_to_sink_state = false;
+                            // strigify each tuple and pack all these strings in one HashSet
+                            let outputs = outputs
+                                .iter()
+                                .map(|tuple| stringify_set(tuple))
+                                .collect::<HashSet<_>>();
+                            state_map.insert(*symbol, outputs);
+                        }
                     }
-                }
 
-                if all_go_to_sink_state {
-                    state_map.clear();
-                    state_map.insert(AlphabetSymbol::Any, sink_state_set.clone());
+                    if all_go_to_sink_state {
+                        state_map.clear();
+                        state_map.insert(AlphabetSymbol::Any, sink_state_set.clone());
+                    }
                 }
             }
 
@@ -1388,6 +1441,9 @@ impl NFA {
                     .insert(AlphabetSymbol::Any, sink_state_set);
             }
 
+            if used_symbol_any {
+                alphabet.insert(AlphabetSymbol::Any);
+            }
             transition_function
         };
 
