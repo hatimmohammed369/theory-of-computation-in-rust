@@ -141,21 +141,16 @@ impl NFA {
         // are less than the total number of states in variable (states_set)
         // this means that some states do not have outgoing transitions
         // and hence the new object is a strictly non-deterministic.
-        let mut processed_states = HashSet::new();
 
         for item in transition_function {
             let (state, symbol, items) = (item.0, item.1, item.2);
-            processed_states.insert(state);
             states_set.insert(state.to_string()); // mark this state as used.
             alphabet_set.insert(symbol);
 
-            if infer_type {
-                // Try inferring the new object type if the function was intructed to do so.
-                if computed_is_deterministic_flag {
-                    // If there is an empty string transition
-                    // then automaton is Nondeterministic.
-                    computed_is_deterministic_flag = !matches!(symbol, AlphabetSymbol::EmptyString);
-                }
+            if infer_type && computed_is_deterministic_flag {
+                // If there is an empty string transition
+                // then automaton is Nondeterministic.
+                computed_is_deterministic_flag = !matches!(symbol, AlphabetSymbol::EmptyString);
             }
 
             if !states.contains(&state) {
@@ -187,42 +182,17 @@ impl NFA {
             }
         }
 
-        if infer_type && computed_is_deterministic_flag {
-            // If some states do not have outgoing transitions
-            // then this automaton is an NFA
-            if processed_states.len() == states_set.len() {
-                // All states have outgoing transitions.
-
-                let mut alphabet_len = alphabet_set.len();
-                if alphabet_set.contains(&AlphabetSymbol::EmptyString) {
-                    /*
-                    The empty string is not (officially) a symbol
-                    We just included it in the alphabet set to avoid unnecessary searches when we must consider it
-                    */
-                    alphabet_len -= 1;
-                }
-                if alphabet_set.contains(&AlphabetSymbol::Any) {
-                    // (Any) is not not officially a symbol, it's just a convience
-                    alphabet_len -= 1;
-                }
-                for state_map in function.values() {
-                    if state_map.len() < alphabet_len {
-                        // Some state does not have transitions for all alphabet symbols.
-                        computed_is_deterministic_flag = false;
-                        break;
-                    }
-                }
-            } else {
-                /*
-                Some states do not have any outgoing transitions
-                hence, this automaton is strictly non-deterministic.
-                */
-                computed_is_deterministic_flag = false;
-            }
-        }
-
         let is_deterministic_flag = if infer_type {
-            computed_is_deterministic_flag
+            Self::_infer_type(&states_set, &function, {
+                let mut true_alphabet = alphabet_set.len();
+                if alphabet_set.contains(&AlphabetSymbol::Any) {
+                    true_alphabet -= 1;
+                }
+                if alphabet_set.contains(&AlphabetSymbol::EmptyString) {
+                    true_alphabet -= 1;
+                }
+                true_alphabet
+            })
         } else {
             is_deterministic
         };
@@ -357,16 +327,40 @@ impl NFA {
         self.is_deterministic
     }
 
+    fn _infer_type(
+        states: &HashSet<String>,
+        transition_function: &HashMap<String, HashMap<AlphabetSymbol, HashSet<String>>>,
+        true_alphabet: usize,
+    ) -> bool {
+        for state in states {
+            match transition_function.get(state) {
+                Some(state_map) => {
+                    if !state_map.contains_key(&AlphabetSymbol::Any)
+                        && (state_map.contains_key(&AlphabetSymbol::EmptyString)
+                            || state_map.len() < true_alphabet)
+                    {
+                        /*
+                        This state either has an empty string transition(s) or
+                        does not have transitions for some alphabet symbol (x)
+                        where x != AlphabetSymbol::Any and x != AlphabetSymbol::EmptyString
+                         */
+                        // It (false) that this automaton is deterministic
+                        return false;
+                    }
+                }
+                None => {
+                    // This state has no transitions
+                    // It (false) that this automaton is deterministic
+                    return false;
+                }
+            }
+        }
+        // It (true) that this automaton is deterministic
+        true
+    }
+
     pub fn infer_type(&mut self) -> &mut Self {
-        if self.transition_function.len() < self.states.len() {
-            // Some states do not have outgoing transitions.
-            self.is_deterministic = false;
-        } else {
-            /*
-            We can't have self.transition_function.len() > self.states.len()
-            because whenever and entry is inserted to transtion_function, we add that entry's key in self.states
-            Thus here we have self.transition_function.len() == self.states.len()
-             */
+        self.is_deterministic = Self::_infer_type(&self.states, &self.transition_function, {
             let mut true_alphabet = self.alphabet.len();
             if self.alphabet.contains(&AlphabetSymbol::Any) {
                 true_alphabet -= 1;
@@ -374,22 +368,8 @@ impl NFA {
             if self.alphabet.contains(&AlphabetSymbol::EmptyString) {
                 true_alphabet -= 1;
             }
-
-            for state_map in self.transition_function.values() {
-                if state_map.contains_key(&AlphabetSymbol::EmptyString) {
-                    // Empty string transition
-                    self.is_deterministic = false;
-                    break;
-                } else if !state_map.contains_key(&AlphabetSymbol::Any) {
-                    let true_keys = state_map.keys().count();
-                    if true_keys < true_alphabet {
-                        // Some state does not have outgoing transitions from some alphabet symbols
-                        self.is_deterministic = false;
-                        break;
-                    }
-                }
-            }
-        }
+            true_alphabet
+        });
         self
     }
 
