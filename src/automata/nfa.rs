@@ -826,9 +826,12 @@ impl NFA {
     pub fn to_regular_expression(
         &self,
         removal_sequence: &[&str],
-        g_start_state: &str,
-        g_accept_state: &str,
     ) -> Result<Rc<ExpressionBase>, String> {
+        let g_start_state = NFA::new_random_state("S");
+        let g_start_state = g_start_state.as_str();
+        let g_accept_state = NFA::new_random_state("A");
+        let g_accept_state = g_accept_state.as_str();
+
         {
             let mut error = String::new();
             let fake_states = removal_sequence
@@ -994,6 +997,47 @@ impl NFA {
         let final_expression = final_expression.borrow();
 
         Ok(Rc::clone(&final_expression))
+    }
+
+    pub fn compute_an_equivalent_regular_expression(&self) -> Result<Rc<ExpressionBase>, String> {
+        let removal_sequence = self
+            .states
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>();
+        let mut sequence = Vec::new();
+        for state in &removal_sequence {
+            sequence.push(state.as_str());
+        }
+        self.to_regular_expression(&sequence[..])
+    }
+
+    pub fn all_regular_expressions(&self) -> Result<Vec<Rc<ExpressionBase>>, String> {
+        let states_vec = self.states.clone().into_iter().collect::<Vec<_>>();
+        let mut sequences = LinkedList::from([Vec::<String>::new()]);
+        for _ in 0..self.states.len() {
+            let end = sequences.len();
+            for _ in 0..end {
+                let mut front_permutation = sequences.pop_front().unwrap();
+                for state in &states_vec {
+                    if !front_permutation.contains(state) {
+                        front_permutation.push(state.to_string());
+                        sequences.push_back(front_permutation.clone());
+                        front_permutation.pop();
+                    }
+                }
+            }
+        }
+        Ok(sequences
+            .into_iter()
+            .map(|seq| {
+                let mut removal_sequence = vec![];
+                for item in &seq {
+                    removal_sequence.push(item.as_str());
+                }
+                self.to_regular_expression(&removal_sequence[..]).unwrap()
+            })
+            .collect::<_>())
     }
 
     /*
