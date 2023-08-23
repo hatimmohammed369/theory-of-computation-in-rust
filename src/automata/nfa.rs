@@ -579,12 +579,13 @@ impl NFA {
 
         let mut accept_states = HashSet::new();
 
-        let sink_state_set = HashSet::from([Self::new_random_state("<DFA-SINK>")]);
+        let sink_state_name = Self::new_random_state("<DFA-SINK>");
+        let sink_state_set = HashSet::from([sink_state_name.to_string()]);
 
-        let mut new_sets = LinkedList::from([start_state.clone()]);
+        let mut sets_queue = LinkedList::from([start_state.clone()]);
         let mut used_sink_state = false;
 
-        while let Some(new_set) = new_sets.pop_front() {
+        while let Some(new_set) = sets_queue.pop_front() {
             let name = stringify_set(&new_set);
             let set_symbols_map = transition_function
                 .entry(name.to_string())
@@ -621,45 +622,40 @@ impl NFA {
                         }
                     }
 
-                    if sigma_transition_set.is_empty() {
-                        used_sink_state = true;
-                        sigma_transition_set = sink_state_set.clone();
-                    } else {
-                        // Take epsilon closure
-                        sigma_transition_set = nfa.epsilon_closure(&sigma_transition_set);
-                        new_sets.push_back(sigma_transition_set.clone());
-                    }
-
-                    set_symbols_map.insert(
-                        AlphabetSymbol::Any,
-                        HashSet::from([stringify_set(&sigma_transition_set)]),
-                    );
+                    set_symbols_map.insert(AlphabetSymbol::Any, {
+                        if sigma_transition_set.is_empty() {
+                            used_sink_state = true;
+                            sink_state_set.clone()
+                        } else {
+                            // Take epsilon closure
+                            sigma_transition_set = nfa.epsilon_closure(&sigma_transition_set);
+                            let sigma_transition_set_name = stringify_set(&sigma_transition_set);
+                            sets_queue.push_back(sigma_transition_set);
+                            HashSet::from([sigma_transition_set_name])
+                        }
+                    });
                 } else {
                     // No state in (new_set) has AlphabetSymbol::Any transition.
                     let mut all_go_sink_state = true;
                     for symbol in &alphabet {
-                        let moved_new_set = {
-                            let x = nfa.move_set(&new_set, symbol);
-                            if x.is_empty() {
+                        set_symbols_map.insert(*symbol, {
+                            // All sets returned by (move_set) are epsilon closures.
+                            let moved_new_set = nfa.move_set(&new_set, symbol);
+                            if moved_new_set.is_empty() {
                                 used_sink_state = true;
                                 sink_state_set.clone()
                             } else {
                                 all_go_sink_state = false;
-                                new_sets.push_back(x.clone());
-                                x
+                                let moved_new_set_name = stringify_set(&moved_new_set);
+                                sets_queue.push_back(moved_new_set);
+                                HashSet::from([moved_new_set_name])
                             }
-                        };
-
-                        set_symbols_map
-                            .insert(*symbol, HashSet::from([stringify_set(&moved_new_set)]));
+                        });
                     }
 
                     if all_go_sink_state {
                         set_symbols_map.clear();
-                        set_symbols_map.insert(
-                            AlphabetSymbol::Any,
-                            HashSet::from([stringify_set(&sink_state_set)]),
-                        );
+                        set_symbols_map.insert(AlphabetSymbol::Any, sink_state_set.clone());
                     }
                 }
             }
@@ -674,8 +670,6 @@ impl NFA {
         }
 
         if used_sink_state {
-            let sink_state_name = stringify_set(&sink_state_set);
-
             states.insert(sink_state_name.to_string());
             alphabet.insert(AlphabetSymbol::Any);
 
@@ -1320,8 +1314,8 @@ impl NFA {
                 .collect::<Vec<_>>()
         };
 
-        let sink_state = Self::new_random_state("<INTERSECTION-SINK>");
-        let sink_state_set = HashSet::from([sink_state.to_string()]);
+        let sink_state_name = Self::new_random_state("<INTERSECTION-SINK>");
+        let sink_state_set = HashSet::from([sink_state_name.to_string()]);
         let mut used_sink_state = false;
 
         let mut alphabet = {
@@ -1375,7 +1369,7 @@ impl NFA {
                         .collect::<Vec<_>>();
                     let outputs = outputs.iter().collect::<Vec<_>>();
                     let outputs = &outputs[..];
-                    let outputs = {
+                    state_map.insert(AlphabetSymbol::Any, {
                         // Choose output set
                         let p = product(outputs);
                         if p.is_empty() {
@@ -1387,8 +1381,7 @@ impl NFA {
                                 .map(|tuple| stringify_set(tuple))
                                 .collect::<HashSet<_>>()
                         }
-                    };
-                    state_map.insert(AlphabetSymbol::Any, outputs);
+                    });
                 } else {
                     let mut all_go_to_sink_state = true;
                     for symbol in &alphabet {
@@ -1405,19 +1398,16 @@ impl NFA {
                             .collect::<Vec<_>>();
                         let outputs = outputs.iter().collect::<Vec<_>>();
                         let outputs = &outputs[..];
-                        let outputs = product(outputs);
-                        if outputs.is_empty() {
-                            state_map.insert(*symbol, sink_state_set.clone());
-                            used_sink_state = true;
-                        } else {
-                            all_go_to_sink_state = false;
-                            // strigify each tuple and pack all these strings in one HashSet
-                            let outputs = outputs
-                                .iter()
-                                .map(|tuple| stringify_set(tuple))
-                                .collect::<HashSet<_>>();
-                            state_map.insert(*symbol, outputs);
-                        }
+                        state_map.insert(*symbol, {
+                            let p = product(outputs);
+                            if p.is_empty() {
+                                used_sink_state = true;
+                                sink_state_set.clone()
+                            } else {
+                                all_go_to_sink_state = false;
+                                p.iter().map(|tuple| stringify_set(tuple)).collect::<_>()
+                            }
+                        });
                     }
 
                     if all_go_to_sink_state {
@@ -1428,7 +1418,6 @@ impl NFA {
             }
 
             if used_sink_state {
-                let sink_state_name = sink_state.to_string();
                 states.push((
                     vec![sink_state_name.to_string()],
                     sink_state_name.to_string(),
@@ -1436,7 +1425,7 @@ impl NFA {
                 alphabet.insert(AlphabetSymbol::Any);
 
                 transition_function
-                    .entry(sink_state.to_string())
+                    .entry(sink_state_name)
                     .or_insert(HashMap::new())
                     .insert(AlphabetSymbol::Any, sink_state_set);
             }
@@ -1509,11 +1498,10 @@ impl NFA {
                 state_map.insert(AlphabetSymbol::Any, sink_state_set.clone());
             } else if !state_map.contains_key(&AlphabetSymbol::Any) {
                 for symbol in &alphabet {
-                    let symbol_set = state_map.entry(*symbol).or_insert(HashSet::new());
-                    if symbol_set.is_empty() {
+                    state_map.entry(*symbol).or_insert({
                         used_sink_state = true;
-                        symbol_set.insert(sink_state_name.to_string());
-                    }
+                        sink_state_set.clone()
+                    });
                 }
             }
         }
@@ -1523,7 +1511,7 @@ impl NFA {
             nfa.states.insert(sink_state_name.to_string());
 
             nfa.transition_function
-                .entry(sink_state_name.to_string())
+                .entry(sink_state_name)
                 .or_insert(HashMap::new())
                 .insert(AlphabetSymbol::Any, sink_state_set);
         }
