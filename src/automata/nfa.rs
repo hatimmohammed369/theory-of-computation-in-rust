@@ -373,6 +373,68 @@ impl NFA {
         self
     }
 
+    pub fn compute_renamed_states_nfa<'a>(
+        nfa: &'a mut Self,
+        aliases: &HashMap<String, String>, // Partial aliases map, not all states must have aliases.
+    ) -> &'a mut Self {
+        let mut aliases = aliases.clone();
+        for state in &nfa.states {
+            // States with no alias are mapped to themselves.
+            aliases
+                .entry(state.to_string())
+                .or_insert(state.to_string());
+        }
+        let name = |state: &String| aliases.get(state).unwrap().to_string();
+        nfa.states.clear();
+        nfa.states.extend(aliases.values().map(ToString::to_string));
+        // Renaming states in each key in each state map
+        for (state, map) in nfa.transition_function.iter_mut() {
+            for symbol_set in map.values_mut() {
+                let set_clone = symbol_set.clone();
+                symbol_set.clear();
+                symbol_set.extend(
+                    set_clone
+                        .into_iter()
+                        .map(|cloned_state| name(&cloned_state)),
+                );
+            }
+        }
+        // Rename keys themeselves
+        for state in aliases.keys() {
+            if let Some(map) = nfa.transition_function.remove(state) {
+                nfa.transition_function.insert(name(state), map);
+            }
+        }
+        nfa.start_state = name(&nfa.start_state);
+        let accept_states_clone = nfa.accept_states.clone();
+        nfa.accept_states.clear();
+        nfa.accept_states.extend(
+            accept_states_clone
+                .into_iter()
+                .map(|accepting| name(&accepting)),
+        );
+        nfa
+    }
+
+    pub fn rename_states<'a>(&'a mut self, aliases: &HashMap<String, String>) -> &'a mut Self {
+        Self::compute_renamed_states_nfa(self, aliases)
+    }
+
+    pub fn rename_states_numerically(&mut self) -> &mut Self {
+        let aliases = {
+            let mut counter = 0usize;
+            self.states
+                .iter()
+                .map(|state| {
+                    let entry = (state.to_string(), counter.to_string());
+                    counter += 1;
+                    entry
+                })
+                .collect::<_>()
+        };
+        Self::compute_renamed_states_nfa(self, &aliases)
+    }
+
     /*
     Return all states reachable from parameter (set) using
     any number of empty string transitions
