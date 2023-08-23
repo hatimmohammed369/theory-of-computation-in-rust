@@ -1545,4 +1545,179 @@ impl NFA {
             dfa1, dfa2,
         )?))
     }
+
+    pub fn compute_minimized_dfa(dfa: &Self) -> Result<Self, String> {
+        if !dfa.is_deterministic {
+            return Err("[NFA::minimize_dfa]: Argument DFA is not deterministic!".to_string());
+        }
+        let alphabet = {
+            let mut alphabet = dfa.alphabet.clone();
+            alphabet.remove(&AlphabetSymbol::Any);
+            alphabet.remove(&AlphabetSymbol::EmptyString);
+            alphabet
+        };
+        let mut groups = LinkedList::from([
+            dfa.accept_states.clone(),
+            dfa.states
+                .difference(&dfa.accept_states)
+                .map(ToString::to_string)
+                .collect::<HashSet<_>>(),
+        ]);
+        loop {
+            let before = groups.len();
+            for _ in 0..before {
+                let group = groups.pop_front().unwrap();
+                let mut partitions =
+                    Vec::<(HashSet<String>, HashMap<AlphabetSymbol, HashSet<String>>)>::new();
+                for state in &group {
+                    let state_map = alphabet
+                        .iter()
+                        .map(|symbol| {
+                            (
+                                *symbol,
+                                dfa.move_set(&HashSet::from([state.to_string()]), symbol)
+                                    .intersection(&group)
+                                    .map(ToString::to_string)
+                                    .collect::<HashSet<_>>(),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+
+                    let mut equivalence_class = None;
+                    for (peers, map) in &mut partitions {
+                        let mut mismatch = false;
+                        for symbol in &alphabet {
+                            if let Some(state_set) = state_map.get(symbol) {
+                                if let Some(map_set) = map.get(symbol) {
+                                    if !(state_set.is_subset(map_set)
+                                        && map_set.is_subset(state_set))
+                                    {
+                                        mismatch = true;
+                                        break;
+                                    }
+                                } else {
+                                    mismatch = true;
+                                    break;
+                                }
+                            } else {
+                                mismatch = true;
+                                break;
+                            }
+                        }
+                        if !mismatch {
+                            equivalence_class = Some(peers);
+                            break;
+                        }
+                    }
+
+                    match equivalence_class {
+                        Some(set) => {
+                            set.insert(state.to_string());
+                        }
+                        None => partitions.push((HashSet::from([state.to_string()]), state_map)),
+                    }
+                }
+
+                if partitions.len() > 1 {
+                    for (peers, _) in partitions {
+                        groups.push_back(peers);
+                    }
+                } else {
+                    groups.push_back(group);
+                }
+            }
+            if before == groups.len() {
+                break;
+            }
+        }
+
+        let representatives = dfa
+            .states
+            .iter()
+            .map(|state| {
+                let mut iter = groups.iter();
+                let mut class = iter.next().unwrap();
+                while !class.contains(state) {
+                    class = iter.next().unwrap();
+                }
+                let class_string = {
+                    let mut set_string = String::from("{");
+                    for elem in class {
+                        set_string.push_str(&format!("{elem}, "));
+                    }
+                    set_string.pop();
+                    set_string.pop();
+                    set_string.push('}');
+                    set_string
+                };
+                (state, (class, class_string))
+            })
+            .collect::<HashMap<_, _>>();
+
+        let find_by_class = |class: &HashSet<String>| {
+            let mut iter = representatives.iter();
+            let mut entry = iter.next().unwrap();
+            loop {
+                let entry_class = entry.1 .0;
+                if entry_class.is_subset(class) && class.is_subset(entry_class) {
+                    break;
+                } else {
+                    entry = iter.next().unwrap();
+                }
+            }
+            entry
+        };
+
+        let find_by_dfa_state = |state: &String| representatives.get(state).unwrap();
+
+        let states = groups
+            .iter()
+            .map(|class| find_by_class(class).1 .1.to_string())
+            .collect::<_>();
+        let transition_function = groups
+            .iter()
+            .map(|class| {
+                let class_entry = find_by_class(class);
+                let name = class_entry.1 .1.to_string();
+                let name_map = alphabet
+                    .iter()
+                    .map(|symbol| {
+                        let symbol = *symbol;
+
+                        let class_representative_dfa_state = class_entry.0.to_string();
+                        let dfa_state = dfa
+                            .move_set(
+                                &HashSet::from([class_representative_dfa_state.to_string()]),
+                                &symbol,
+                            )
+                            .into_iter()
+                            .next()
+                            .unwrap();
+                        let set = find_by_dfa_state(&dfa_state).1.clone();
+                        let set = HashSet::from([set]);
+                        (symbol, set)
+                    })
+                    .collect::<HashMap<_, _>>();
+                (name, name_map)
+            })
+            .collect::<_>();
+        let start_state = find_by_dfa_state(&dfa.start_state).1.to_string();
+        let accept_states = dfa
+            .accept_states
+            .iter()
+            .map(|f| find_by_dfa_state(f).1.to_string())
+            .collect::<_>();
+        let is_deterministic = true;
+        let dfa = RefCell::new(None);
+
+        Ok(NFA {
+            states,
+            alphabet,
+            transition_function,
+            start_state,
+            accept_states,
+            is_deterministic,
+            dfa,
+        })
+    }
 }
