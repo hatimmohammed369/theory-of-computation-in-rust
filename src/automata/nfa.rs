@@ -442,7 +442,7 @@ impl NFA {
     any number: including 0, and thus value in parameter (set) is always part of return value
     thus return value of (epsilon_closure) is never the empty set
      */
-    fn epsilon_closure(&self, set: &HashSet<String>) -> HashSet<String> {
+    pub fn epsilon_closure(&self, set: &HashSet<String>) -> HashSet<String> {
         let mut out = set.clone();
 
         let mut new_items = out
@@ -468,7 +468,7 @@ impl NFA {
     Return all states reachable from each state (q) in parameter (set)
     when reading symbol in paramter (symbol)
      */
-    fn move_set(&self, set: &HashSet<String>, symbol: &AlphabetSymbol) -> HashSet<String> {
+    pub fn move_set(&self, set: &HashSet<String>, symbol: &AlphabetSymbol) -> HashSet<String> {
         let mut out = HashSet::new();
 
         for q in set {
@@ -1825,5 +1825,69 @@ impl NFA {
             is_deterministic,
             dfa,
         })
+    }
+
+    pub fn accepts_empty_string(&self) -> bool {
+        self.accept_states
+            .intersection(&self.epsilon_closure(&HashSet::from([self.start_state.to_string()])))
+            .next()
+            .is_some()
+    }
+
+    pub fn is_accepting_set(&self, set: &HashSet<String>) -> bool {
+        self.accept_states.intersection(set).next().is_some()
+    }
+
+    pub fn computation_history(&self, input: &str) -> ComputationHistory {
+        ComputationHistory::new(self, input)
+    }
+}
+
+#[derive(Debug)]
+pub struct ComputationHistory<'a> {
+    nfa: &'a NFA,
+    input: Vec<char>,
+    state: HashSet<String>,
+    position: usize,
+}
+
+impl<'a> ComputationHistory<'a> {
+    pub fn new(nfa: &'a NFA, input: &str) -> ComputationHistory<'a> {
+        let input = input.chars().collect::<_>();
+        let state = nfa.epsilon_closure(&HashSet::from([nfa.start_state.to_string()]));
+        let position = 0;
+        ComputationHistory {
+            nfa,
+            input,
+            state,
+            position,
+        }
+    }
+
+    pub fn read_state(&self) -> HashSet<String> {
+        self.state.clone()
+    }
+}
+
+impl<'a> Iterator for ComputationHistory<'a> {
+    type Item = HashSet<String>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.position < self.input.len() {
+            if self.state.is_empty() {
+                self.state = self
+                    .nfa
+                    .epsilon_closure(&HashSet::from([self.nfa.start_state.to_string()]));
+            }
+            let extension = self.nfa.move_set(
+                &self.state,
+                &AlphabetSymbol::Character(self.input[self.position]),
+            );
+            self.state.clear();
+            self.state.extend(extension.into_iter());
+            self.position += 1;
+            Some(self.read_state())
+        } else {
+            None
+        }
     }
 }

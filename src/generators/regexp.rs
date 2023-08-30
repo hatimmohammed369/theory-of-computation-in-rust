@@ -1,7 +1,12 @@
+#![allow(dead_code)]
+#![allow(unused_variables)]
+#![allow(unused_mut)]
+#![allow(unused_imports)]
 mod compiler;
 
-use crate::automata::nfa::{AlphabetSymbol, NFA};
+use crate::automata::nfa::{AlphabetSymbol, ComputationHistory, NFA};
 use crate::automata::ComputationResult;
+use std::collections::HashSet;
 
 // Regular Expressions module.
 
@@ -265,6 +270,104 @@ impl<'a> Regexp<'a> {
         match self.compiled_pattern.compute(input, false) {
             Ok(result) => result == ComputationResult::Accept,
             Err(_) => false,
+        }
+    }
+
+    pub fn find_iter<'c>(&'c self, input: &'c str, begin: usize, end: usize) -> MatchIterator {
+        let target = &input[begin..end];
+        let target_vec = input.chars().collect::<_>();
+        let position = 0;
+        let matched_empty_string = false;
+        let regexp = &self;
+        let computation_state = self.compiled_pattern.computation_history(input);
+        MatchIterator {
+            target,
+            target_vec,
+            position,
+            matched_empty_string,
+            regexp,
+            computation_state,
+        }
+    }
+}
+
+pub struct Match<'a> {
+    slice: &'a str,
+    begin: usize,
+    end: usize,
+}
+
+impl Display for Match<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Match(slice=\"{}\", begin={}, end={})",
+            self.slice, self.begin, self.end
+        )
+    }
+}
+
+#[derive(Debug)]
+pub struct MatchIterator<'a, 'b> {
+    target: &'a str,
+    target_vec: Vec<char>,
+    position: usize,
+    matched_empty_string: bool,
+    regexp: &'a Regexp<'b>,
+    computation_state: ComputationHistory<'a>,
+}
+
+impl<'a, 'b> Iterator for MatchIterator<'a, 'b> {
+    type Item = Match<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        // Find the smallest next match
+        if self.position <= self.target.len() {
+            let nfa = &self.regexp.compiled_pattern;
+            let empty_string_match = {
+                if nfa.accepts_empty_string() {
+                    Some(Match {
+                        slice: "",
+                        begin: self.position,
+                        end: self.position,
+                    })
+                } else {
+                    None
+                }
+            };
+            let begin = self.position;
+            let mut end = None;
+            let non_empty_string_match = {
+                while let Some(set) = self.computation_state.next() {
+                    if nfa.is_accepting_set(&set) {
+                        end = Some(self.position);
+                        break;
+                    } else {
+                        self.position += 1;
+                    }
+                }
+                match end {
+                    Some(end_pos) => {
+                        self.position += 1;
+                        let end_pos = end_pos + 1;
+                        let slice = &self.target[begin..end_pos];
+                        let end = end_pos;
+                        Some(Match { slice, begin, end })
+                    }
+                    None => {
+                        self.position = begin + 1;
+                        None
+                    }
+                }
+            };
+            if non_empty_string_match.is_none() {
+                self.matched_empty_string = true;
+                empty_string_match
+            } else {
+                self.matched_empty_string = false;
+                non_empty_string_match
+            }
+        } else {
+            None
         }
     }
 }
