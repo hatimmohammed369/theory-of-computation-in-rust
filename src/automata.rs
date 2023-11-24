@@ -16,3 +16,9 @@ pub enum ComputationResult {
     Accept,
     Reject,
 }
+
+#[derive(Debug, Clone)]
+pub enum ComputationStyle {
+    Deterministic,
+    Nondeterministic,
+}

@@ -13,6 +13,8 @@ use std::fmt::Display;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use super::ComputationStyle;
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub enum AlphabetSymbol {
     Any, // Any (not the empty string) character, will be useful when implement `.` metacharacter in regular expressions.
@@ -66,13 +68,13 @@ pub struct NFA {
     This flag determines if the automaton is deterministic or not
     You can either pass its value or have the constructor infer its value
      */
-    is_deterministic: bool,
+    computation_style: ComputationStyle,
 
     /*
     Cache field containg an equivalent DFA to this automaton
     When calling get_dfa (which returns the equivalent DFA) the code looks up the field
-    Calling get_dfa on NFA which is already an DFA (is_deterministic = true) clones (self)
-    thus it's not a good idea to call this function when is_deterministic flag is set
+    Calling get_dfa on NFA which is already an DFA (computation_style = ComputationStyle::Deterministic) clones (self)
+    thus it's not a good idea to call this function when (computation_style) field is ComputationStyle::Deterministic variant
      */
     dfa: RefCell<Option<Rc<NFA>>>,
 }
@@ -106,7 +108,7 @@ impl NFA {
         start_state: &str,
         accept_states: &[&str],
         infer_type: bool, // Infer the type of the new automaton based on parameter values.
-        is_deterministic: bool, // when paramter infer_type is false, just use this value in (is_deterministic) parameter.
+        computation_style: &ComputationStyle,
     ) -> NFA {
         let mut states_set = states
             .iter()
@@ -134,9 +136,9 @@ impl NFA {
         // The final transition function of the new object.
         let mut function = HashMap::new();
 
-        let mut computed_is_deterministic_flag = true;
+        let mut computed_computation_style = ComputationStyle::Nondeterministic;
 
-        // This hash set is used in computing is_deterministic flag if infer_type flag is set.
+        // This hash set is used in computing (computation_style) field if infer_type flag is set.
         // if processed states, which are the first entry in each element in parameter (transition_function),
         // are less than the total number of states in variable (states_set)
         // this means that some states do not have outgoing transitions
@@ -147,10 +149,12 @@ impl NFA {
             states_set.insert(state.to_string()); // mark this state as used.
             alphabet_set.insert(symbol);
 
-            if infer_type && computed_is_deterministic_flag {
+            if infer_type && matches!(computed_computation_style, ComputationStyle::Deterministic) {
                 // If there is an empty string transition
                 // then automaton is Nondeterministic.
-                computed_is_deterministic_flag = !matches!(symbol, AlphabetSymbol::EmptyString);
+                if matches!(symbol, AlphabetSymbol::EmptyString) {
+                    computed_computation_style = ComputationStyle::Nondeterministic;
+                }
             }
 
             if !states.contains(&state) {
@@ -182,7 +186,7 @@ impl NFA {
             }
         }
 
-        let is_deterministic_flag = if infer_type {
+        let computation = if infer_type {
             Self::_infer_type(&states_set, &function, {
                 let mut true_alphabet = alphabet_set.len();
                 if alphabet_set.contains(&AlphabetSymbol::Any) {
@@ -194,7 +198,7 @@ impl NFA {
                 true_alphabet
             })
         } else {
-            is_deterministic
+            computation_style.clone()
         };
 
         NFA {
@@ -203,7 +207,7 @@ impl NFA {
             transition_function: function,
             start_state: start_state.to_string(),
             accept_states: accept_states.iter().map(ToString::to_string).collect(),
-            is_deterministic: is_deterministic_flag,
+            computation_style: computation,
             dfa: RefCell::new(None),
         }
     }
@@ -217,16 +221,17 @@ impl NFA {
         transition_function: HashMap<String, HashMap<AlphabetSymbol, HashSet<String>>>,
         start_state: String,
         accept_states: HashSet<String>,
-        is_deterministic: bool,
+        computation_style: &ComputationStyle,
         dfa: RefCell<Option<Rc<NFA>>>,
     ) -> NFA {
+        let computation_style = computation_style.clone();
         NFA {
             states,
             alphabet,
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         }
     }
@@ -324,14 +329,18 @@ impl NFA {
     }
 
     pub fn is_deterministic(&self) -> bool {
-        self.is_deterministic
+        matches!(self.computation_style, ComputationStyle::Deterministic)
+    }
+
+    pub fn read_computation_style(&self) -> &ComputationStyle {
+        &self.computation_style
     }
 
     fn _infer_type(
         states: &HashSet<String>,
         transition_function: &HashMap<String, HashMap<AlphabetSymbol, HashSet<String>>>,
         true_alphabet: usize,
-    ) -> bool {
+    ) -> ComputationStyle {
         for state in states {
             match transition_function.get(state) {
                 Some(state_map) => {
@@ -344,23 +353,23 @@ impl NFA {
                         does not have transitions for some alphabet symbol (x)
                         where x != AlphabetSymbol::Any and x != AlphabetSymbol::EmptyString
                          */
-                        // It (false) that this automaton is deterministic
-                        return false;
+                        // It is (false) that this automaton is deterministic
+                        return ComputationStyle::Nondeterministic;
                     }
                 }
                 None => {
                     // This state has no transitions
-                    // It (false) that this automaton is deterministic
-                    return false;
+                    // It is (false) that this automaton is deterministic
+                    return ComputationStyle::Nondeterministic;
                 }
             }
         }
         // It (true) that this automaton is deterministic
-        true
+        ComputationStyle::Deterministic
     }
 
     pub fn infer_type(&mut self) -> &mut Self {
-        self.is_deterministic = Self::_infer_type(&self.states, &self.transition_function, {
+        self.computation_style = Self::_infer_type(&self.states, &self.transition_function, {
             let mut true_alphabet = self.alphabet.len();
             if self.alphabet.contains(&AlphabetSymbol::Any) {
                 true_alphabet -= 1;
@@ -742,7 +751,7 @@ impl NFA {
         }
 
         let start_state = stringify_set(&start_state);
-        let is_deterministic = true;
+        let computation_style = ComputationStyle::Deterministic;
         let dfa = RefCell::new(None);
 
         NFA {
@@ -751,13 +760,13 @@ impl NFA {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         }
     }
 
     pub fn transform_to_dfa(&mut self) -> &mut Self {
-        if self.is_deterministic {
+        if self.is_deterministic() {
             return self;
         }
 
@@ -788,7 +797,7 @@ impl NFA {
         self.accept_states.clear();
         self.accept_states.extend(accept_states.into_iter());
 
-        self.is_deterministic = true;
+        self.computation_style = ComputationStyle::Deterministic;
 
         self
     }
@@ -797,7 +806,7 @@ impl NFA {
         if self.dfa.borrow().is_none() {
             let dfa = {
                 let automaton = {
-                    if self.is_deterministic {
+                    if self.is_deterministic() {
                         self.clone()
                     } else {
                         Self::compute_equivalent_dfa(self)
@@ -1077,7 +1086,7 @@ impl NFA {
                 .insert(nfa.start_state.to_string());
         }
 
-        let is_deterministic = false;
+        let computation_style = ComputationStyle::Nondeterministic;
         let dfa = RefCell::new(None);
 
         NFA {
@@ -1086,7 +1095,7 @@ impl NFA {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         }
     }
@@ -1178,7 +1187,7 @@ impl NFA {
             accept_states.extend(automaton.accept_states.iter().map(|q| style(q, counter)));
         }
 
-        let is_deterministic = false;
+        let computation_style = ComputationStyle::Nondeterministic;
         let dfa = RefCell::new(None);
 
         NFA {
@@ -1187,7 +1196,7 @@ impl NFA {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         }
     }
@@ -1272,7 +1281,7 @@ impl NFA {
         }
 
         let start_state = style(&automata[0].start_state, 0);
-        let is_deterministic = false;
+        let computation_style = ComputationStyle::Nondeterministic;
         let dfa = RefCell::new(None);
         let accept_states = automata
             .last()
@@ -1288,13 +1297,13 @@ impl NFA {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         }
     }
 
     pub fn invert(&mut self) -> &mut NFA {
-        if !self.is_deterministic {
+        if !self.is_deterministic() {
             eprintln!("[NFA::invert]: Invoking automaton MUST BE deterministic");
             std::panic::set_hook(Box::new(|_| {}));
             panic!();
@@ -1358,7 +1367,7 @@ impl NFA {
         {
             let mut error = String::new();
             for (idx, nfa) in automata.iter().enumerate() {
-                if !nfa.is_deterministic {
+                if !nfa.is_deterministic() {
                     error.push_str(&format!("NFA in index {idx} is not deterministic!\n"));
                 }
             }
@@ -1570,7 +1579,7 @@ impl NFA {
 
         let states = states.into_iter().map(|(_, name)| name).collect::<_>();
 
-        let is_deterministic = true;
+        let computation_style = ComputationStyle::Deterministic;
         let dfa = RefCell::new(None);
 
         NFA {
@@ -1579,7 +1588,7 @@ impl NFA {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         }
     }
@@ -1627,10 +1636,10 @@ impl NFA {
 
     pub fn symmetric_difference(dfa1: &NFA, dfa2: &NFA) -> Result<NFA, String> {
         let mut error = String::new();
-        if !dfa1.is_deterministic {
+        if !dfa1.is_deterministic() {
             error.push_str("[NFA::symmetric_difference]: First automaton is not deterministic!\n");
         }
-        if !dfa2.is_deterministic {
+        if !dfa2.is_deterministic() {
             error.push_str("[NFA::symmetric_difference]: Second automaton is not deterministic!\n");
         }
         if !error.is_empty() {
@@ -1653,7 +1662,7 @@ impl NFA {
     }
 
     pub fn compute_minimized_dfa(dfa: &Self) -> Result<Self, String> {
-        if !dfa.is_deterministic {
+        if !dfa.is_deterministic() {
             return Err("[NFA::minimize_dfa]: Argument DFA is not deterministic!".to_string());
         }
         let alphabet = {
@@ -1813,7 +1822,7 @@ impl NFA {
             .iter()
             .map(|f| find_by_dfa_state(f).1.to_string())
             .collect::<_>();
-        let is_deterministic = true;
+        let computation_style = ComputationStyle::Deterministic;
         let dfa = RefCell::new(None);
 
         Ok(NFA {
@@ -1822,7 +1831,7 @@ impl NFA {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            computation_style,
             dfa,
         })
     }

@@ -1,6 +1,7 @@
 #![allow(unused)]
 #![allow(dead_code)]
 
+use crate::automata::ComputationStyle;
 use crate::generators::regexp::ExpressionBase;
 use std::collections::HashSet;
 
@@ -284,7 +285,7 @@ impl ExpressionBase {
         }
 
         let alphabet = alphabet.clone();
-        let is_deterministic = false;
+        let computation_style = ComputationStyle::Nondeterministic;
         let dfa = RefCell::new(None);
 
         NFA::raw_new(
@@ -293,7 +294,7 @@ impl ExpressionBase {
             transition_function,
             start_state,
             accept_states,
-            is_deterministic,
+            &computation_style,
             dfa,
         )
     }
