@@ -1850,6 +1850,23 @@ impl NFA {
     pub fn computation_history(&self, input: &str) -> ComputationHistory {
         ComputationHistory::new(self, input)
     }
+
+    pub fn enumerate_strings(&self) {
+        let mut strings = LinkedList::from([String::from("")]);
+        loop {
+            let back = strings.pop_front().unwrap();
+            if let Ok(result) = self.compute(&back, false) {
+                if result == ComputationResult::Accept {
+                    println!("{}", back)
+                }
+            };
+            for item in &self.alphabet {
+                if let AlphabetSymbol::Character(ch) = item {
+                    strings.push_back(format!("{back}{ch}"));
+                }
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
