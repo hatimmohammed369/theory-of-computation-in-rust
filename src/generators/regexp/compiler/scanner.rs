@@ -12,7 +12,7 @@ pub enum TokenName {
     Star,
     Pipe,
     Dot,
-    Range, // Minus/hyphene -, to be used inside character classes
+    RangeHyphen, // Minus/hyphene -, to be used inside character classes
     // Minus defines ranges inside character classes
     // when preceeded by nothing or succeeded by nothing it's treated
     // like any other character inside the character class
@@ -38,14 +38,26 @@ pub struct Token {
     pub position: usize,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum RangePart {
+    None,
+    LowerLimit,
+    Hyphen, // -
+    UpperLimit,
+}
+
 pub struct Scanner {
     pub chars: Vec<char>,
     pub alphabet: HashSet<AlphabetSymbol>,
     empty_string_found: bool,
     inside_character_class: bool,
     // field (inside_character_class) is bool because we can't nest character classes
+    range_part: RangePart,
+    // field (range)
     current: usize,
 }
+
+use RangePart::*;
 
 impl Scanner {
     pub fn new(source: &str) -> Scanner {
@@ -54,6 +66,7 @@ impl Scanner {
             alphabet: HashSet::new(),
             empty_string_found: false,
             inside_character_class: false,
+            range_part: None,
             current: 0,
         }
     }
@@ -63,7 +76,7 @@ impl Iterator for Scanner {
     type Item = Token;
 
     fn next(&mut self) -> Option<Token> {
-        let mut next = None;
+        let mut next = Option::None;
 
         let peek = {
             if self.current >= self.chars.len() {
@@ -95,7 +108,9 @@ impl Iterator for Scanner {
                 || (prev == '|' && (peek == '|' || peek == ')' || peek == '\0'))
                 || (prev == '[' && peek == ']')
             {
-                self.inside_character_class = true;
+                if prev == '[' && peek == ']' {
+                    self.inside_character_class = true;
+                }
                 self.alphabet.insert(AlphabetSymbol::EmptyString);
                 next = Some(Token {
                     name: TokenName::EmptyString,
@@ -153,13 +168,50 @@ impl Iterator for Scanner {
                 }
                 ']' => {
                     self.inside_character_class = false;
+                    self.range_part = None;
                     tok.name = RightBracket;
                 }
                 '-' if self.inside_character_class
+                    && self.range_part == LowerLimit
                     && next_char != ']'
-                    && !(prev == '[' && !prev_escaped) =>
+                    && (prev != '[' || prev_escaped) // previous character is not an un-escaped [
+                    && ((prev.is_ascii_digit() && next_char.is_ascii_digit()) // digits range
+                        || /*alphabet range*/ (prev.is_alphabetic() && next_char.is_alphabetic())) =>
                 {
-                    tok.name = Range;
+                    let unordered = (prev as u8) > (next_char as u8);
+                    let different_cases = {
+                        (prev.is_lowercase() && next_char.is_uppercase())
+                            || (prev.is_uppercase() && next_char.is_lowercase())
+                    };
+                    if unordered || different_cases {
+                        use std::panic;
+                        let pos = self.current;
+                        let mut caret = String::new();
+                        while caret.len() < pos - 1 {
+                            caret.push(' ');
+                        }
+                        caret.push_str("^^^");
+                        let pattern = self
+                            .chars
+                            .iter()
+                            .fold(String::new(), |a, b| format!("{a}{b}"));
+
+                        eprint!(
+                            "Error in position {pos}:\nBad range\n\
+                             valid ranges are n-m, where 0<= n <= m <= 9\n\
+                             and x-y where x and y:\n\
+                             both english alphabet letters\n\
+			     x and y are both lowercase or both uppercase\n\
+                             x comes before y in the english alphabet\n\
+			     {pattern}\n{caret}\n"
+                        );
+
+                        panic::set_hook(Box::new(|_| {}));
+                        panic!();
+                    } else {
+                        tok.name = RangeHyphen;
+                        self.range_part = Hyphen;
+                    }
                 }
                 '^' if self.inside_character_class && (prev == '[' && !prev_escaped) => {
                     if next_char == ']' {
@@ -258,15 +310,35 @@ impl Iterator for Scanner {
                             panic!();
                         }
                     }
+                    if self.inside_character_class {
+                        self.range_part = None;
+                    }
                     self.current += 1;
                 }
                 c => {
                     self.alphabet.insert(AlphabetSymbol::Character(c));
-                    next = Some(Token {
-                        name: TokenName::Symbol,
-                        lexeme: c,
-                        position: self.current,
-                    });
+                    tok.name = Symbol;
+                    if self.inside_character_class {
+                        self.range_part = {
+                            if c.is_alphanumeric() {
+                                match self.range_part {
+                                    None => LowerLimit,
+                                    LowerLimit => LowerLimit,
+                                    Hyphen => UpperLimit,
+                                    UpperLimit => LowerLimit,
+                                }
+                            } else if c == '-' {
+                                // In case - escaped from the arm handling it above
+                                match self.range_part {
+                                    LowerLimit => Hyphen,
+                                    _ => None,
+                                }
+                            } else {
+                                // Any other non-alphanumeric character that's also not -
+                                None
+                            }
+                        }
+                    }
                 }
             }
 
