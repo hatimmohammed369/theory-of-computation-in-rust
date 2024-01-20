@@ -2,6 +2,7 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 #![allow(unused_imports)]
+
 pub mod compiler;
 
 use crate::automata::nfa::{AlphabetSymbol, ComputationHistory, NFA};
@@ -191,7 +192,8 @@ pub fn concat_string_regexes(exprs: &[Rc<ExpressionBase>]) -> Rc<ExpressionBase>
     })
 }
 
-use crate::generators::regexp::compiler::{Parser, Scanner};
+use crate::generators::regexp::compiler::parser::Parser;
+use crate::generators::regexp::compiler::scanner::Scanner;
 
 #[derive(Debug)]
 pub struct Regexp<'a> {
@@ -199,7 +201,7 @@ pub struct Regexp<'a> {
     compiled_pattern: NFA,
 }
 
-use crate::generators::regexp::compiler::Expression;
+use crate::generators::regexp::compiler::parser::Expression;
 use std::collections::LinkedList;
 use std::fmt::Display;
 use std::rc::Rc;
