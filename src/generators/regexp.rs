@@ -337,8 +337,8 @@ impl<'a, 'b> Iterator for MatchIterator<'a, 'b> {
             let begin = self.position;
             let mut end = None;
             let non_empty_string_match = {
-                while let Some(set) = self.computation_state.next() {
-                    if nfa.is_accepting_set(&set) {
+                for set in &self.computation_state.next() {
+                    if nfa.is_accepting_set(set) {
                         end = Some(self.position);
                         break;
                     } else {

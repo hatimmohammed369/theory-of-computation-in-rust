@@ -9,14 +9,14 @@ use std::collections::HashSet;
 pub enum TokenName {
     EmptyString,
     Symbol,
-    RightParen,
-    LeftParen,
+    RightParen, // )
+    LeftParen,  // (
     Star,
     Pipe,
     Dot,
     EscapedSlash,      // \\
-    EscapedRightParen, // \(
-    EscapedLeftParen,  // \)
+    EscapedRightParen, // \)
+    EscapedLeftParen,  // \(
     EscapedStar,       // \*
     EscapedPipe,       // \|
 }
@@ -133,8 +133,8 @@ impl Iterator for Scanner {
                 }
                 '\\' => {
                     // EscapedSlash,       \\
-                    // EscapedRightParen,  \(
-                    // EscapedLeftParen,   \)
+                    // EscapedRightParen,  \)
+                    // EscapedLeftParen,   \(
                     // EscapedStar,        \*
                     // EscapedPipe,        \|
 

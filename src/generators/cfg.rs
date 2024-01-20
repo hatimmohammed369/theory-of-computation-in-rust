@@ -129,4 +129,116 @@ impl CFG {
             .into_iter()
             .fold(String::new(), |a, b| format!("{a}{b}"))
     }
+
+    /*
+    Search for a left-most derivation of paramter (string)
+     */
+    pub fn left_search(&self, string: &str) -> bool {
+        let string_chars = string.chars().collect::<Vec<_>>();
+        let mut derivations = LinkedList::new();
+        derivations.extend(
+            self.rules[&self.start_variable]
+                .iter()
+                .map(|rule_vec| rule_vec.iter().map(ToString::to_string).collect::<Vec<_>>()),
+        );
+        let get_string = |vec: &Vec<String>| -> String {
+            let mut s = String::new();
+            for item in vec {
+                if self.terminals.contains(item) {
+                    s.push_str(item);
+                }
+            }
+            s
+        };
+        while let Some(front_derivation) = derivations.pop_front() {
+            let found_variable = front_derivation
+                .iter()
+                .any(|item| self.variables.contains(item));
+            let front_derivation_string = get_string(&front_derivation);
+            if !found_variable && front_derivation_string == string {
+                return true;
+            } else if front_derivation_string.len() > string.len() {
+                continue;
+            }
+
+            for (index, term) in front_derivation.iter().enumerate() {
+                if self.variables.contains(term) {
+                    for rule in &self.rules[term] {
+                        let mut copy = front_derivation[..index]
+                            .iter()
+                            .map(ToString::to_string)
+                            .collect::<Vec<_>>();
+                        copy.extend(rule.iter().map(ToString::to_string));
+                        if index + 1 < front_derivation.len() {
+                            copy.extend(
+                                front_derivation[(index + 1)..]
+                                    .iter()
+                                    .map(ToString::to_string),
+                            );
+                        }
+                        if get_string(&copy).len() <= string.len() {
+                            let mut ptr = 0;
+                            let mut end = copy.len();
+
+                            let mut head_mismatch = false;
+                            'head_mismatch_search_loop: for term in &copy {
+                                if self.terminals.contains(term) {
+                                    for ch in term.chars() {
+                                        if string_chars[ptr] != ch {
+                                            head_mismatch = true;
+                                            break 'head_mismatch_search_loop;
+                                        } else {
+                                            ptr += 1;
+                                        }
+                                    }
+                                    end += 1;
+                                } else {
+                                    break;
+                                }
+                            }
+
+                            if !head_mismatch {
+                                end -= copy.len();
+                                ptr = string.len();
+
+                                let mut tail_mismatch = false;
+                                'tail_mismatch_search_loop: for term in copy[end..].iter().rev() {
+                                    if self.terminals.contains(term) {
+                                        for ch in term.chars().rev() {
+                                            if string_chars[ptr - 1] != ch {
+                                                tail_mismatch = true;
+                                                break 'tail_mismatch_search_loop;
+                                            } else {
+                                                ptr -= 1;
+                                            }
+                                        }
+                                    } else {
+                                        break;
+                                    }
+                                }
+
+                                if !tail_mismatch {
+                                    derivations.push_back(copy);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    pub fn enumerate_strings_using_left_search(&self) {
+        let mut strings = LinkedList::from([String::new()]);
+        loop {
+            let back = strings.pop_front().unwrap();
+            if self.left_search(&back) {
+                println!("Found `{back}`");
+            }
+            for item in &self.terminals {
+                strings.push_back(format!("{back}{item}"))
+            }
+        }
+    }
 }
