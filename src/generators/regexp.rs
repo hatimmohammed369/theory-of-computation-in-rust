@@ -2,7 +2,7 @@
 #![allow(unused_variables)]
 #![allow(unused_mut)]
 #![allow(unused_imports)]
-mod compiler;
+pub mod compiler;
 
 use crate::automata::nfa::{AlphabetSymbol, ComputationHistory, NFA};
 use crate::automata::ComputationResult;

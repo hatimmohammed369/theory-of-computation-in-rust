@@ -9,16 +9,30 @@ use std::collections::HashSet;
 pub enum TokenName {
     EmptyString,
     Symbol,
-    RightParen, // )
-    LeftParen,  // (
+    RightParen,   // )
+    LeftParen,    // (
+    RightBracket, // ]
+    LeftBracket,  // [
     Star,
     Pipe,
     Dot,
-    EscapedSlash,      // \\
-    EscapedRightParen, // \)
-    EscapedLeftParen,  // \(
-    EscapedStar,       // \*
-    EscapedPipe,       // \|
+    Range, // Minus/hyphene -, to be used inside character classes
+    // Minus defines ranges inside character classes
+    // when preceeded by nothing or succeeded by nothing it's treated
+    // like any other character inside the character class
+    Caret, // ^, to be used inside character classes
+    // Caret inverts the character classes omly when its after the opening [
+    // otherwise, it's treated like any other character inside the character class
+    // aslo it's an error write ^ alone inside [ and ]
+    EscapedSlash,        // \\
+    EscapedRightParen,   // \)
+    EscapedLeftParen,    // \(
+    EscapedStar,         // \*
+    EscapedPipe,         // \|
+    EscapedRightBracket, // \], to be used inside character classes
+    EscapedLeftBracket,  // \[, to be used inside character classes
+    EscapedMinus,        // \-, to be used inside character classes
+    EscapedCaret,        // \^, to be used inside character classes
 }
 
 #[derive(Debug, Clone)]
@@ -32,6 +46,8 @@ pub struct Scanner {
     chars: Vec<char>,
     pub alphabet: HashSet<AlphabetSymbol>,
     empty_string_found: bool,
+    inside_character_class: bool,
+    // field (inside_character_class) is bool because we can't nest character classes
     current: usize,
 }
 
@@ -41,6 +57,7 @@ impl Scanner {
             chars: source.chars().collect::<_>(),
             alphabet: HashSet::new(),
             empty_string_found: false,
+            inside_character_class: false,
             current: 0,
         }
     }
@@ -80,7 +97,9 @@ impl Iterator for Scanner {
             if (prev == '\0' && (peek == '\0' || peek == '|'))
                 || (prev == '(' && (peek == '|' || peek == ')'))
                 || (prev == '|' && (peek == '|' || peek == ')' || peek == '\0'))
+                || (prev == '[' && peek == ']')
             {
+                self.inside_character_class = true;
                 self.alphabet.insert(AlphabetSymbol::EmptyString);
                 next = Some(Token {
                     name: TokenName::EmptyString,
@@ -92,84 +111,27 @@ impl Iterator for Scanner {
         }
 
         if next.is_none() && self.current < self.chars.len() {
+            use TokenName::*;
             self.empty_string_found = false;
+            next = Some(Token {
+                name: LeftParen,
+                lexeme: peek,
+                position: self.current,
+            });
+            let tok = next.as_mut().unwrap();
 
+            let next_char = *self.chars.get(self.current + 1).unwrap_or(&'\0');
             match peek {
                 '(' => {
-                    next = Some(Token {
-                        name: TokenName::LeftParen,
-                        lexeme: '(',
-                        position: self.current,
-                    });
+                    tok.name = LeftParen;
                 }
                 ')' => {
-                    next = Some(Token {
-                        name: TokenName::RightParen,
-                        lexeme: ')',
-                        position: self.current,
-                    });
+                    tok.name = RightParen;
                 }
-                '*' => {
-                    next = Some(Token {
-                        name: TokenName::Star,
-                        lexeme: '*',
-                        position: self.current,
-                    });
-                }
-                '|' => {
-                    next = Some(Token {
-                        name: TokenName::Pipe,
-                        lexeme: '|',
-                        position: self.current,
-                    });
-                }
-                '.' => {
-                    self.alphabet.insert(AlphabetSymbol::Any);
-                    next = Some(Token {
-                        name: TokenName::Dot,
-                        lexeme: '.',
-                        position: self.current,
-                    });
-                }
-                '\\' => {
-                    // EscapedSlash,       \\
-                    // EscapedRightParen,  \)
-                    // EscapedLeftParen,   \(
-                    // EscapedStar,        \*
-                    // EscapedPipe,        \|
-
-                    let next_char = *self.chars.get(self.current + 1).unwrap_or(&'\0');
-                    self.alphabet.insert(AlphabetSymbol::Character(next_char));
-                    if next_char == '\\' {
-                        next = Some(Token {
-                            name: TokenName::EscapedSlash,
-                            lexeme: next_char,
-                            position: self.current,
-                        });
-                    } else if next_char == '(' {
-                        next = Some(Token {
-                            name: TokenName::EscapedLeftParen,
-                            lexeme: next_char,
-                            position: self.current,
-                        });
-                    } else if next_char == ')' {
-                        next = Some(Token {
-                            name: TokenName::EscapedRightParen,
-                            lexeme: next_char,
-                            position: self.current,
-                        });
-                    } else if next_char == '*' {
-                        next = Some(Token {
-                            name: TokenName::EscapedStar,
-                            lexeme: next_char,
-                            position: self.current,
-                        });
-                    } else if next_char == '|' {
-                        next = Some(Token {
-                            name: TokenName::EscapedPipe,
-                            lexeme: next_char,
-                            position: self.current,
-                        });
+                '[' => {
+                    if !self.inside_character_class {
+                        self.inside_character_class = true;
+                        tok.name = LeftBracket;
                     } else {
                         use std::panic;
                         let pos = self.current;
@@ -177,22 +139,128 @@ impl Iterator for Scanner {
                         while caret.len() < pos {
                             caret.push(' ');
                         }
-                        caret.push_str("^^");
+                        caret.push('^');
                         let pattern = self
                             .chars
                             .iter()
                             .fold(String::new(), |a, b| format!("{a}{b}"));
 
-                        let msg = format!(
-                            "Un-recognized escape sequence\
-				 `\\{next_char}` in position {pos}:\n\
-				 {pattern}\n{caret}\n
-				 "
+                        eprint!(
+                            "Error in position {pos}:\nYou can't nest character classes\n\
+			     To match [ and ] inside character classes use \\[ and \\]\n\
+			     {pattern}\n{caret}\n"
                         );
-                        eprint!("{msg}");
 
                         panic::set_hook(Box::new(|_| {}));
                         panic!();
+                    }
+                }
+                ']' => {
+                    self.inside_character_class = false;
+                    tok.name = RightBracket;
+                }
+                '-' if self.inside_character_class
+                    && next_char != ']'
+                    && !(prev == '[' && !prev_escaped) =>
+                {
+                    tok.name = Range;
+                }
+                '^' if self.inside_character_class && (prev == '[' && !prev_escaped) => {
+                    if next_char == ']' {
+                        use std::panic;
+                        let pos = self.current;
+                        let mut caret = String::new();
+                        while caret.len() < pos {
+                            caret.push(' ');
+                        }
+                        caret.push('^');
+                        let pattern = self
+                            .chars
+                            .iter()
+                            .fold(String::new(), |a, b| format!("{a}{b}"));
+
+                        eprint!(
+                            "Error in position {pos}:\nYou must add characters after ^ when it's preceeded by nothing inside character class\n\
+			     To match ^ inside character class use \\^\n\
+			     {pattern}\n{caret}\n"
+                        );
+
+                        panic::set_hook(Box::new(|_| {}));
+                        panic!();
+                    } else {
+                        tok.name = Caret;
+                    }
+                }
+                '*' => {
+                    tok.name = Star;
+                }
+                '|' => {
+                    tok.name = Pipe;
+                }
+                '.' => {
+                    tok.name = Dot;
+                }
+                '\\' => {
+                    // EscapedSlash,       \\
+                    // EscapedRightParen,  \)
+                    // EscapedLeftParen,   \(
+                    // EscapedStar,        \*
+                    // EscapedPipe,        \|
+                    // EscapedRightBracket, \]
+                    // EscapedLeftBracket,  \[
+                    // EscapedMinus,        \-
+                    tok.lexeme = next_char;
+                    self.alphabet.insert(AlphabetSymbol::Character(next_char));
+                    match next_char {
+                        '\\' => {
+                            tok.name = EscapedSlash;
+                        }
+                        '(' => {
+                            tok.name = EscapedLeftParen;
+                        }
+                        ')' => {
+                            tok.name = EscapedRightParen;
+                        }
+                        '*' => {
+                            tok.name = EscapedStar;
+                        }
+                        '|' => {
+                            tok.name = EscapedPipe;
+                        }
+                        '[' => {
+                            tok.name = EscapedLeftBracket;
+                        }
+                        ']' => {
+                            tok.name = EscapedRightBracket;
+                        }
+                        '-' => {
+                            tok.name = EscapedMinus;
+                        }
+                        '^' => {
+                            tok.name = EscapedCaret;
+                        }
+                        _ => {
+                            use std::panic;
+                            let pos = self.current;
+                            let mut caret = String::new();
+                            while caret.len() < pos {
+                                caret.push(' ');
+                            }
+                            caret.push_str("^^");
+                            let pattern = self
+                                .chars
+                                .iter()
+                                .fold(String::new(), |a, b| format!("{a}{b}"));
+
+                            eprint!(
+                                "Error in position {pos}:\n\
+                                 Un-recognized escape sequence `\\{next_char}`\n\
+				 {pattern}\n{caret}\n"
+                            );
+
+                            panic::set_hook(Box::new(|_| {}));
+                            panic!();
+                        }
                     }
                     self.current += 1;
                 }
@@ -379,9 +447,9 @@ impl RegexpParseError {
 }
 
 enum GroupingType {
-    Parentheses, // ()
-    Range,       // []
-    Multiplier,  // {m, n}
+    Parentheses,    // ()
+    CharacterClass, // []
+    Multiplier,     // {m, n}
 }
 
 pub struct Parser {
