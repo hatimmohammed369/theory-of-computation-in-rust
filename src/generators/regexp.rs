@@ -20,6 +20,10 @@ pub enum ExpressionBase {
     Star(Rc<ExpressionBase>),
     Union(Vec<Rc<ExpressionBase>>),
     Concat(Vec<Rc<ExpressionBase>>),
+    CharacterClass {
+        inverted: bool,
+        ranges: HashSet<(u8, u8)>,
+    },
 }
 
 impl Display for ExpressionBase {
@@ -53,6 +57,20 @@ impl Display for ExpressionBase {
                     });
                     let first = exprs.next().unwrap();
                     exprs.fold(first, |current, next| format!("{current}{next}"))
+                }
+                ExpressionBase::CharacterClass { inverted, ranges } => {
+                    let ranges = ranges
+                        .iter()
+                        .map(|(low, high)| {
+                            if low < high {
+                                format!("{}-{}", *low as char, *high as char)
+                            } else {
+                                format!("{}", *low as char)
+                            }
+                        })
+                        .fold(String::new(), |cur, next| format!("{cur}{next}"));
+                    let inverted = String::from(if *inverted { "^" } else { "" });
+                    format!("[{inverted}{ranges}]")
                 }
             }
         )

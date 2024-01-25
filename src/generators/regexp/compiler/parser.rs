@@ -1,5 +1,6 @@
 use crate::automata::nfa::AlphabetSymbol;
 use crate::automata::nfa::NFA;
+use crate::automata::ComputationStyle;
 use crate::generators::regexp::compiler::scanner::*;
 use crate::generators::regexp::ExpressionBase;
 use std::cell::RefCell;
@@ -69,7 +70,13 @@ impl ExpressionBase {
 
                 return NFA::concatenate(&automata[..]);
             }
-            ExpressionBase::EmptySet => todo!(),
+            ExpressionBase::CharacterClass { inverted, ranges } => {
+                panic!();
+            }
+            ExpressionBase::EmptySet => {
+                // compiling an actual regular expression can never yield the empty set.
+                panic!();
+            }
         }
 
         let alphabet = alphabet.clone();
@@ -179,6 +186,7 @@ pub struct Parser {
     groupings: RefCell<Vec<GroupingType>>,
 }
 
+use TokenName::*;
 impl Parser {
     pub fn new(scanner: Scanner) -> Parser {
         let scanner = RefCell::new(scanner);
@@ -260,7 +268,9 @@ impl Parser {
     Union => Concat ( '|' Concat )? ( '|' Concat )*
     Concat => Star Star*
     Star => Primary ( '*' )?
-    Primary => EMPTY_STRING | DOT | SYMBOL | '(' Expression ')'
+    Primary => EMPTY_STRING | DOT | SYMBOL | '(' Expression ')' | CharacterClass
+    CharacterClass => '[' ( ('^')? Range+ )? ']'
+    Range => SYMBOL ( '-' SYMBOL )?
      */
     pub fn parse(&self) -> Result<Rc<Expression>, String> {
         self.advance();
@@ -283,7 +293,7 @@ impl Parser {
         let parsed_expression = self.union()?;
         if let Some(tok) = self.read_current() {
             if self.groupings.borrow().is_empty() // No active group
-		&& tok.name == TokenName::RightParen
+		&& tok.name == RightParen
             {
                 let message = String::from("Un-matched `)`");
                 let position = tok.position;
@@ -310,7 +320,7 @@ impl Parser {
                 break;
             }
 
-            if !self.match_current(TokenName::Pipe) {
+            if !self.match_current(Pipe) {
                 break;
             }
         }
@@ -409,7 +419,7 @@ impl Parser {
     // Star => Primary ( '*' )?
     pub fn star(&self) -> Result<Rc<Expression>, RegexpParseError> {
         let primary = self.primary()?;
-        if self.match_current(TokenName::Star) {
+        if self.match_current(Star) {
             if primary.base.borrow().is_none() {
                 /*
                 Could not parse an expression
@@ -450,15 +460,17 @@ impl Parser {
         }
     }
 
-    // Primary => EMPTY_STRING | SYMBOL | '(' Expression ')'
+    // Primary => EMPTY_STRING | DOT | SYMBOL | '(' Expression ')' | CharacterClass
+    // CharacterClass => '[' ( ('^')? Range+ )? ']'
+    // Range => SYMBOL ( '-' SYMBOL )?
     pub fn primary(&self) -> Result<Rc<Expression>, RegexpParseError> {
         match self.read_current() {
             Some(peek) => {
-                if peek.name == TokenName::LeftParen {
+                if peek.name == LeftParen {
                     self.groupings.borrow_mut().push(GroupingType::Parentheses);
                     self.advance();
                     let parsed_expr = self.expression()?;
-                    self.consume(TokenName::RightParen, "Expected `)` after expression.")?;
+                    self.consume(RightParen, "Expected `)` after expression.")?;
                     self.groupings.borrow_mut().pop();
 
                     let grouping = ExpressionBase::Grouping(Rc::clone(
@@ -484,16 +496,13 @@ impl Parser {
                     returned_expression.children.borrow_mut().push(parsed_expr);
 
                     Ok(returned_expression)
-                } else if peek.name == TokenName::Dot
-                    || peek.name == TokenName::Symbol
-                    || Self::is_escaped_token(&peek)
-                {
+                } else if peek.name == Dot || peek.name == Symbol || Self::is_escaped_token(&peek) {
                     // Single-symbol expression
                     self.advance();
                     let parent = RefCell::new(None);
                     let symbol = ExpressionBase::Symbol(Rc::new({
                         // Choose symbol
-                        if peek.name == TokenName::Dot {
+                        if peek.name == Dot {
                             AlphabetSymbol::Any
                         } else {
                             AlphabetSymbol::Character(peek.lexeme)
@@ -507,7 +516,7 @@ impl Parser {
                         base,
                         children,
                     }))
-                } else if peek.name == TokenName::EmptyString {
+                } else if peek.name == EmptyString {
                     // Empty string expression
                     // Something like (), (|), ()|(), ...
                     self.advance();
@@ -515,6 +524,83 @@ impl Parser {
                     let symbol = ExpressionBase::EmptyString;
                     let symbol = Rc::new(symbol);
                     let base = RefCell::new(Some(symbol));
+                    let children = RefCell::new(Vec::new());
+                    Ok(Rc::new(Expression {
+                        parent,
+                        base,
+                        children,
+                    }))
+                } else if peek.name == LeftBracket {
+                    // A character class expression
+                    self.groupings
+                        .borrow_mut()
+                        .push(GroupingType::CharacterClass);
+                    self.advance();
+                    let inverted = {
+                        // Check if this character class is inverted
+                        if self.read_current().as_ref().unwrap().name == Caret {
+                            self.advance();
+                            true
+                        } else {
+                            false
+                        }
+                    };
+                    let mut ranges = Vec::<(u8, u8)>::new();
+                    use crate::generators::regexp::compiler::scanner::RangePart;
+                    let mut range_part = RangePart::None;
+                    while self.read_current().unwrap().name != RightBracket {
+                        let current_token = self.read_current().unwrap();
+                        let lexeme = current_token.lexeme;
+                        let current_name = current_token.name;
+                        match current_name {
+                            EmptyString => {
+                                // nothing to be done.
+                            }
+                            Symbol => {
+                                // Ordinary characters
+                                if lexeme.is_alphanumeric() {
+                                    match range_part {
+                                        RangePart::Hyphen => {
+                                            ranges.last_mut().unwrap().1 = lexeme as u8;
+                                            range_part = RangePart::UpperLimit;
+                                        }
+                                        _ => {
+                                            ranges.push((lexeme as u8, lexeme as u8));
+                                            range_part = RangePart::LowerLimit;
+                                        }
+                                    }
+                                } else {
+                                    ranges.push((lexeme as u8, lexeme as u8));
+                                    range_part = RangePart::None;
+                                }
+                            }
+                            RightParen | LeftParen | RightBracket | LeftBracket | Star | Pipe
+                            | Dot => {
+                                panic!(
+                                    "TokenName::{current_name:?} was emitted inside character class"
+                                );
+                            }
+                            RangeHyphen => {
+                                range_part = RangePart::Hyphen;
+                            }
+                            Caret => {
+                                panic!(
+                                    "TokenName::Caret was emitted in the middle of a character class"
+                                );
+                            }
+                            escaped => {
+                                ranges.push((lexeme as u8, lexeme as u8));
+                            }
+                        }
+                        self.advance();
+                    }
+                    self.consume(RightBracket, "Expected `]` after character class.")?;
+                    self.groupings.borrow_mut().pop();
+
+                    let ranges = ranges.into_iter().collect::<_>();
+                    let character_class = ExpressionBase::CharacterClass { inverted, ranges };
+                    let parent = RefCell::new(None);
+                    let base = RefCell::new(Some(Rc::new(character_class)));
                     let children = RefCell::new(Vec::new());
                     Ok(Rc::new(Expression {
                         parent,
@@ -539,11 +625,15 @@ impl Parser {
     fn is_escaped_token(token: &Token) -> bool {
         matches!(
             token.name,
-            TokenName::EscapedSlash
-                | TokenName::EscapedRightParen
-                | TokenName::EscapedLeftParen
-                | TokenName::EscapedStar
-                | TokenName::EscapedPipe
+            EscapedSlash
+                | EscapedRightParen
+                | EscapedLeftParen
+                | EscapedStar
+                | EscapedPipe
+                | EscapedRightBracket
+                | EscapedLeftBracket
+                | EscapedMinus
+                | EscapedCaret
         )
     }
 }
